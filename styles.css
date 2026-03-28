@@ -146,6 +146,10 @@ body {
   }
 }
 
+.card-grid--single {
+  max-width: 28rem;
+}
+
 .card {
   height: 100%;
   margin: 0;

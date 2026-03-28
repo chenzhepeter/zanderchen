@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>热带雨林跑酷竞速</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a1a0a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Arial', sans-serif; }
+canvas { display: block; max-width: 100vw; max-height: 100vh; width: auto; height: auto; }
+#game-container { position: relative; }
+#start-screen, #end-screen {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  background: rgba(0,0,0,0.85); color: #fff; pointer-events: auto; z-index: 10;
+}
+#start-screen h1 { font-size: 44px; color: #4ade80; text-shadow: 0 0 20px #22c55e; margin-bottom: 8px; }
+#start-screen h2 { font-size: 18px; color: #86efac; margin-bottom: 25px; }
+#end-screen h1 { font-size: 40px; margin-bottom: 8px; }
+#end-screen h2 { font-size: 22px; color: #fbbf24; margin-bottom: 16px; }
+.btn {
+  padding: 14px 36px; font-size: 20px; border: none; border-radius: 8px;
+  cursor: pointer; background: #22c55e; color: #fff; font-weight: bold;
+  transition: transform 0.1s; margin-top: 12px;
+}
+.btn:hover { transform: scale(1.05); background: #16a34a; }
+.controls-info { color: #a3e635; font-size: 13px; margin-top: 18px; text-align: center; line-height: 1.8; }
+.result-row { font-size: 18px; color: #e2e8f0; margin: 4px 0; }
+.result-row.winner { color: #fbbf24; font-size: 22px; font-weight: bold; }
+#end-screen { display: none; }
+</style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="game"></canvas>
+  <div id="start-screen">
+    <h1>🌴 热带雨林跑酷 🌴</h1>
+    <h2>Tropical Jungle Parkour Race</h2>
+    <button class="btn" onclick="startGame()">开始比赛</button>
+    <div class="controls-info">
+      <b>操作说明</b><br>
+      A/D 或 ←/→ : 左右移动<br>
+      W 或 ↑ 或 空格 : 跳跃<br>
+      S 或 ↓ : 下蹲<br>
+      Shift : 加速跑（消耗体力）
+    </div>
+  </div>
+  <div id="end-screen">
+    <h1 id="end-title"></h1>
+    <h2 id="end-subtitle"></h2>
+    <div id="results"></div>
+    <button class="btn" onclick="startGame()">再来一局</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = 960, H = 540;
+canvas.width = W; canvas.height = H;
+
+const GRAVITY = 0.55;
+const GROUND_Y = H - 80;
+const TRACK_LENGTH = 7000;
+const GAME_DURATION = 45;
+const PLAYER_W = 32, PLAYER_H = 52;
+const CROUCH_H = 28;
+const FPS = 60;
+const DT = 1 / FPS;
+
+const LEAF_GREENS = ['#1a5c1a', '#2d7a2d', '#3d9a3d', '#1e6b1e', '#0f4f0f'];
+
+let gameState = 'menu';
+let gameTime = 0;
+let cameraX = 0;
+let platforms = [];
+let obstacles = [];
+let decorations = [];
+let clouds = [];
+let particles = [];
+let fruits = [];
+let monsters = [];
+let pandas = [];
+let swords = [];
+let rivers = [];
+let bees = [];
+let lastTime = 0;
+
+class Runner {
+  constructor(name, color, bodyColor2, isPlayer, aiSkill) {
+    this.name = name;
+    this.color = color;
+    this.bodyColor2 = bodyColor2;
+    this.isPlayer = isPlayer;
+    this.aiSkill = aiSkill || 0.5;
+    this.reset();
+  }
+  reset() {
+    this.x = 80;
+    this.y = GROUND_Y - PLAYER_H;
+    this.vx = 0;
+    this.vy = 0;
+    this.onGround = true;
+    this.crouching = false;
+    this.sprinting = false;
+    this.stamina = 100;
+    this.baseSpeed = 3.5;
+    this.sprintSpeed = 6.2;
+    this.facing = 1;
+    this.animFrame = 0;
+    this.animTimer = 0;
+    this.finished = false;
+    this.finishTime = null;
+    this.distance = 0;
+    this.stunTimer = 0;
+    this.ridingPanda = null;
+    this.hasSword = false;
+    this.swordTimer = 0;
+    this.inRiver = false;
+    this.aiJumpCD = 0;
+    this.aiCrouchT = 0;
+    this.aiDecT = 0;
+    this.aiSprint = false;
+  }
+  get h() { return this.crouching ? CROUCH_H : PLAYER_H; }
+
+  update(keys) {
+    if (this.finished) return;
+
+    // Riding panda — panda controls movement
+    if (this.ridingPanda) {
+      // Auto-dismount if panda died
+      if (!this.ridingPanda.alive) {
+        this.ridingPanda = null;
+        this.stunTimer = 0.5;
+      }
+    }
+    if (this.ridingPanda) {
+      // Jump off panda
+      const wantJump = this.isPlayer
+        ? (keys['KeyW'] || keys['ArrowUp'] || keys['Space'])
+        : false; // AI won't jump off
+      if (wantJump) {
+        this.ridingPanda.rider = null;
+        this.ridingPanda = null;
+        this.vy = -10;
+        this.onGround = false;
+      } else {
+        this._checkFruits();
+        // Check vine collision while riding
+        for (const obs of obstacles) {
+          if (obs.type === 'high' &&
+              this.x + PLAYER_W - 6 > obs.x && this.x + 6 < obs.x + obs.w &&
+              this.y + PLAYER_H > obs.y && this.y < obs.y + obs.h) {
+            this.ridingPanda.rider = null;
+            this.ridingPanda = null;
+            this.x -= 40; this.vx = -2; this.vy = -3; this.stunTimer = 1.5;
+            break;
+          }
+        }
+        if (this.ridingPanda) {
+          this.distance = Math.max(this.distance, this.x);
+          if (this.x >= TRACK_LENGTH && !this.finished) { this.finished = true; this.finishTime = gameTime; }
+          return;
+        }
+      }
+    }
+
+    // Stunned — can't move
+    if (this.stunTimer > 0) {
+      this.stunTimer -= DT;
+      this.vx = 0;
+      this.vy += GRAVITY;
+      this.y += this.vy;
+      if (this.y + PLAYER_H >= GROUND_Y) { this.y = GROUND_Y - PLAYER_H; this.vy = 0; }
+      // Still check fruit pickup while stunned
+      this._checkFruits();
+      return;
+    }
+
+    if (this.isPlayer) this.playerInput(keys);
+    else this.ai();
+
+    this.vy += GRAVITY;
+    this.x += this.vx;
+    this.y += this.vy;
+
+    this.onGround = false;
+    if (this.y + PLAYER_H >= GROUND_Y) {
+      this.y = GROUND_Y - PLAYER_H;
+      this.vy = 0;
+      this.onGround = true;
+    }
+
+    const cy = this.crouching ? this.y + PLAYER_H - CROUCH_H : this.y;
+    const ch = this.crouching ? CROUCH_H : PLAYER_H;
+    for (const p of platforms) {
+      if (p.trunk) continue;
+      if (this.vy >= 0 &&
+          this.x + PLAYER_W - 5 > p.x && this.x + 5 < p.x + p.w &&
+          this.y + PLAYER_H >= p.y && this.y + PLAYER_H <= p.y + 14) {
+        this.y = p.y - PLAYER_H;
+        this.vy = 0;
+        this.onGround = true;
+      }
+    }
+
+    for (const obs of obstacles) {
+      const ox = obs.x, oy = obs.y, ow = obs.w, oh = obs.h;
+      if (this.x + PLAYER_W - 6 > ox && this.x + 6 < ox + ow &&
+          cy + ch - 4 > oy && cy + 4 < oy + oh) {
+        if (obs.type === 'high') {
+          // Vines — knockback + stun (lighter for AI to prevent stuck loops)
+          if (this.isPlayer) {
+            this.x -= 30; this.vx = -1; this.stunTimer = 1.2;
+          } else {
+            this.vx *= 0.1; this.stunTimer = 0.3;
+          }
+          if (this.ridingPanda) { this.ridingPanda.rider = null; this.ridingPanda = null; }
+          for (let k = 0; k < 8; k++) {
+            particles.push({ x: ox + ow / 2, y: oy + oh / 2, vx: (Math.random() - 0.5) * 5, vy: -2 - Math.random() * 3, life: 20, color: '#3d6a1a' });
+          }
+          break;
+        } else {
+          // Low obstacles are solid walls
+          if (this.vx > 0) { this.x = ox - PLAYER_W; this.vx = -1; }
+          else { this.x = ox + ow; this.vx = 1; }
+        }
+      }
+    }
+
+    this._checkFruits();
+    // River check — slow down when swimming
+    this.inRiver = false;
+    for (const rv of rivers) {
+      if (this.x + PLAYER_W > rv.x && this.x < rv.x + rv.w && this.onGround) {
+        this.inRiver = true;
+        this.vx *= 0.55;
+      }
+    }
+    this.animTimer += Math.abs(this.vx) * 0.12;
+    if (this.animTimer > 1) { this.animTimer = 0; this.animFrame = (this.animFrame + 1) % 4; }
+    this.distance = Math.max(this.distance, this.x);
+    if (this.x >= TRACK_LENGTH && !this.finished) {
+      this.finished = true;
+      this.finishTime = gameTime;
+    }
+  }
+
+  _checkFruits() {
+    for (const f of fruits) {
+      if (!f.collected && this.x + PLAYER_W > f.x && this.x < f.x + f.w &&
+          this.y + PLAYER_H > f.y && this.y < f.y + f.h) {
+        f.collected = true;
+        if (f.poison) {
+          this.stunTimer = 2.5;
+          this.vx = 0;
+          for (let i = 0; i < 8; i++) {
+            particles.push({ x: f.x + f.w / 2, y: f.y + f.h / 2, vx: (Math.random() - 0.5) * 5, vy: -1 - Math.random() * 3, life: 25, color: '#ef4444' });
+          }
+        } else {
+          this.stamina = Math.min(100, this.stamina + 35);
+          for (let i = 0; i < 6; i++) {
+            particles.push({ x: f.x + f.w / 2, y: f.y + f.h / 2, vx: (Math.random() - 0.5) * 4, vy: -1 - Math.random() * 3, life: 18, color: '#4ade80' });
+          }
+        }
+      }
+    }
+    // Sword pickup
+    for (const s of swords) {
+      if (!s.collected && this.x + PLAYER_W > s.x && this.x < s.x + s.w &&
+          this.y + PLAYER_H > s.y && this.y < s.y + s.h) {
+        s.collected = true;
+        this.hasSword = true;
+        this.swordTimer = 20; // 20 seconds of sword power
+        for (let i = 0; i < 6; i++) {
+          particles.push({ x: s.x + s.w / 2, y: s.y + s.h / 2, vx: (Math.random() - 0.5) * 4, vy: -2 - Math.random() * 2, life: 20, color: '#facc15' });
+        }
+      }
+    }
+    // Sword timer
+    if (this.hasSword) {
+      this.swordTimer -= DT;
+      if (this.swordTimer <= 0) { this.hasSword = false; this.swordTimer = 0; }
+    }
+  }
+
+  playerInput(keys) {
+    const left = keys['KeyA'] || keys['ArrowLeft'];
+    const right = keys['KeyD'] || keys['ArrowRight'];
+    const jump = keys['KeyW'] || keys['ArrowUp'] || keys['Space'];
+    const crouch = keys['KeyS'] || keys['ArrowDown'];
+    const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+
+    this.crouching = crouch && this.onGround;
+    this.sprinting = sprint && !this.crouching && this.stamina > 0;
+    let speed = this.crouching ? 1.8 : (this.sprinting ? this.sprintSpeed : this.baseSpeed);
+    if (this.sprinting) { this.stamina = Math.max(0, this.stamina - 0.4); }
+
+    if (right) { this.vx = speed; this.facing = 1; }
+    else if (left) { this.vx = -speed; this.facing = -1; }
+    else { this.vx *= 0.75; }
+
+    if (jump && this.onGround && !this.crouching) {
+      this.vy = -12.5;
+      this.onGround = false;
+    }
+  }
+
+  ai() {
+    this.aiJumpCD--;
+    if (this.aiCrouchT > 0) { this.aiCrouchT--; this.crouching = true; } else { this.crouching = false; }
+    this.aiDecT--;
+
+    let needJump = false, needCrouch = false;
+    const look = 100 + this.aiSkill * 100;
+
+    for (const obs of obstacles) {
+      const dx = obs.x - this.x;
+      if (obs.type === 'low' && dx > -10 && dx < look) {
+        needJump = true;
+      } else if (obs.type === 'high') {
+        // Detect ahead AND while currently inside the obstacle
+        const insideOrAhead = dx > -(obs.w + PLAYER_W) && dx < look;
+        if (insideOrAhead) needCrouch = true;
+      }
+    }
+    for (const p of platforms) {
+      const dx = p.x - this.x;
+      if (dx > 0 && dx < 90 && p.y < this.y) needJump = true;
+    }
+
+    if (this.aiDecT <= 0) {
+      this.aiDecT = 20 + Math.random() * 30;
+      this.aiSprint = Math.random() < this.aiSkill * 0.55 && this.stamina > 25;
+    }
+
+    this.sprinting = this.aiSprint && this.stamina > 3;
+    let speed = this.sprinting ? this.sprintSpeed * (0.82 + this.aiSkill * 0.18) : this.baseSpeed * (0.88 + this.aiSkill * 0.12);
+    if (this.crouching) speed *= 0.5;
+    if (this.sprinting) this.stamina = Math.max(0, this.stamina - 0.35);
+
+    this.vx = speed;
+    this.facing = 1;
+
+    if (needJump && this.onGround && this.aiJumpCD <= 0) {
+      this.vy = -12.5;
+      this.onGround = false;
+      this.aiJumpCD = 25;
+    }
+    if (needCrouch && !needJump) this.aiCrouchT = Math.max(this.aiCrouchT, 30);
+
+  }
+
+  draw(camX) {
+    const sx = this.x - camX;
+    if (sx < -60 || sx > W + 60) return;
+    const h = this.h;
+    const oY = this.crouching ? PLAYER_H - CROUCH_H : 0;
+    const baseY = this.y + oY;
+
+    ctx.save();
+    ctx.translate(sx + PLAYER_W / 2, baseY + h / 2);
+    if (this.facing < 0) ctx.scale(-1, 1);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(0, h / 2 + (GROUND_Y - baseY - h) - 2, 14, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.fillStyle = this.color;
+    const bw = PLAYER_W - 6;
+    ctx.beginPath();
+    ctx.roundRect(-bw / 2, -h / 2 + 12, bw, h - 12, 3);
+    ctx.fill();
+
+    // Shirt detail
+    ctx.fillStyle = this.bodyColor2;
+    ctx.fillRect(-bw / 2 + 2, -h / 2 + 16, bw - 4, 8);
+
+    // Head
+    ctx.fillStyle = '#e8c49a';
+    ctx.beginPath();
+    ctx.arc(0, -h / 2 + 8, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hair
+    ctx.fillStyle = '#3a2a1a';
+    ctx.beginPath();
+    ctx.arc(0, -h / 2 + 4, 10, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#222';
+    ctx.fillRect(3, -h / 2 + 6, 3, 3);
+
+    // Arms
+    const armSwing = Math.sin(this.animFrame * Math.PI / 2) * 0.5;
+    ctx.fillStyle = '#e8c49a';
+    ctx.save();
+    ctx.translate(-bw / 2 - 2, -h / 2 + 18);
+    ctx.rotate(armSwing);
+    ctx.fillRect(-2, 0, 5, 14);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(bw / 2 + 2, -h / 2 + 18);
+    ctx.rotate(-armSwing);
+    ctx.fillRect(-3, 0, 5, 14);
+    ctx.restore();
+
+    // Legs
+    if (!this.crouching) {
+      const legSwing = Math.sin(this.animFrame * Math.PI / 2) * 0.5;
+      ctx.fillStyle = '#2a4a7a';
+      ctx.save();
+      ctx.translate(-5, h / 2 - 6);
+      ctx.rotate(legSwing);
+      ctx.fillRect(-3, 0, 7, 12);
+      // Shoe
+      ctx.fillStyle = '#4a3020';
+      ctx.fillRect(-3, 10, 9, 4);
+      ctx.restore();
+      ctx.save();
+      ctx.translate(5, h / 2 - 6);
+      ctx.rotate(-legSwing);
+      ctx.fillRect(-4, 0, 7, 12);
+      ctx.fillStyle = '#4a3020';
+      ctx.fillRect(-4, 10, 9, 4);
+      ctx.restore();
+    }
+
+    // Sprint particles
+    if (this.sprinting && Math.abs(this.vx) > 3) {
+      ctx.globalAlpha = 0.5;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = '#ffd700';
+        ctx.fillRect(-bw / 2 - 6 - i * 7, -h / 4 + (Math.random() - 0.5) * h * 0.6, 5, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+
+    // Stun effect — spinning stars
+    if (this.stunTimer > 0) {
+      const t = gameTime * 4;
+      for (let i = 0; i < 3; i++) {
+        const angle = t + i * Math.PI * 2 / 3;
+        const starX = sx + PLAYER_W / 2 + Math.cos(angle) * 16;
+        const starY = baseY - 8 + Math.sin(angle) * 6;
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = '10px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('*', starX, starY);
+      }
+      // Red tint on body
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(sx + 3, baseY, PLAYER_W - 6, h);
+      ctx.globalAlpha = 1;
+    }
+
+    // Sword held by runner
+    if (this.hasSword) {
+      const swordX = sx + (this.facing > 0 ? PLAYER_W + 2 : -10);
+      const swordY = baseY + h / 2 - 12;
+      // Blade
+      ctx.fillStyle = '#e2e8f0';
+      ctx.save();
+      ctx.translate(swordX + 4, swordY + 12);
+      ctx.rotate(this.facing > 0 ? -0.3 : 0.3);
+      ctx.fillRect(-2, -16, 4, 20);
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(-5, 2, 10, 3);
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(-1, 5, 3, 6);
+      ctx.restore();
+      // Golden glow around runner
+      ctx.globalAlpha = 0.15 + Math.sin(gameTime * 5) * 0.05;
+      ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx + PLAYER_W / 2, baseY + h / 2, 22, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Name
+    ctx.fillStyle = this.isPlayer ? '#ffd700' : '#ccc';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.name, sx + PLAYER_W / 2, baseY - 6);
+  }
+}
+
+let player, npc1, npc2, runners = [];
+let keys = {};
+
+function generateLevel() {
+  platforms = []; obstacles = []; decorations = []; clouds = []; fruits = []; monsters = []; pandas = []; swords = []; rivers = []; bees = [];
+
+  for (let x = 400; x < TRACK_LENGTH - 300; x += 200 + Math.random() * 280) {
+    const r = Math.random();
+    if (r < 0.3) {
+      obstacles.push({ x, y: GROUND_Y - 32, w: 40 + Math.random() * 25, h: 32, type: 'low', style: Math.random() < 0.5 ? 'log' : 'rock' });
+    } else if (r < 0.55) {
+      obstacles.push({ x, y: GROUND_Y - PLAYER_H - 10, w: 65 + Math.random() * 35, h: 18, type: 'high', style: 'vine' });
+    } else if (r < 0.8) {
+      const pw = 90 + Math.random() * 100;
+      const py = GROUND_Y - 75 - Math.random() * 70;
+      platforms.push({ x, y: py, w: pw, h: 14 });
+      if (Math.random() < 0.5) {
+        obstacles.push({ x: x + pw + 50, y: GROUND_Y - 30, w: 35, h: 30, type: 'low', style: 'rock' });
+      }
+    } else {
+      obstacles.push({ x, y: GROUND_Y - 30, w: 35, h: 30, type: 'low', style: 'rock' });
+      obstacles.push({ x: x + 130, y: GROUND_Y - PLAYER_H - 10, w: 55, h: 18, type: 'high', style: 'vine' });
+    }
+  }
+
+  for (let x = 0; x < TRACK_LENGTH + 500; x += 70 + Math.random() * 110) {
+    decorations.push({ x, type: 'tree', h: 110 + Math.random() * 140, layer: Math.random() < 0.5 ? 0 : 1 });
+  }
+  for (let x = 0; x < TRACK_LENGTH + 500; x += 35 + Math.random() * 55) {
+    decorations.push({ x, type: 'bush', w: 30 + Math.random() * 35, h: 18 + Math.random() * 18, layer: 2 });
+  }
+  for (let i = 0; i < 25; i++) {
+    clouds.push({ x: Math.random() * TRACK_LENGTH, y: 15 + Math.random() * 70, w: 50 + Math.random() * 90, speed: 0.1 + Math.random() * 0.15 });
+  }
+  // Jumpable trees — thick trunks with branch platforms at different heights
+  for (let x = 600; x < TRACK_LENGTH - 500; x += 900 + Math.random() * 700) {
+    const trunkX = x;
+    // Lower branch
+    platforms.push({ x: trunkX - 35, y: GROUND_Y - 80 - Math.random() * 30, w: 70, h: 12, tree: true });
+    // Upper branch
+    platforms.push({ x: trunkX - 30, y: GROUND_Y - 140 - Math.random() * 30, w: 60, h: 12, tree: true });
+    // Trunk (visual only — stored for drawing)
+    platforms.push({ x: trunkX - 10, y: GROUND_Y - 180, w: 20, h: 180, tree: true, trunk: true });
+  }
+  // Place exactly 10 green and 10 red fruits evenly along the track
+  const fruitSpacing = (TRACK_LENGTH - 600) / 20;
+  const fruitSlots = [];
+  for (let i = 0; i < 20; i++) {
+    fruitSlots.push(300 + i * fruitSpacing + Math.random() * fruitSpacing * 0.5);
+  }
+  // Shuffle and assign: first 10 green, last 10 red
+  for (let i = fruitSlots.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [fruitSlots[i], fruitSlots[j]] = [fruitSlots[j], fruitSlots[i]];
+  }
+  for (let i = 0; i < 20; i++) {
+    fruits.push({ x: fruitSlots[i], y: GROUND_Y - 22, w: 18, h: 18, collected: false, poison: i >= 13 });
+  }
+  // Monsters that patrol back and forth
+  for (let x = 800; x < TRACK_LENGTH - 500; x += 1800 + Math.random() * 1200) {
+    monsters.push({
+      x, y: GROUND_Y - 36, w: 36, h: 36,
+      originX: x, range: 80 + Math.random() * 60,
+      speed: 1.2 + Math.random() * 0.8, dir: 1,
+      animT: Math.random() * 10, mouthOpen: false, dead: false
+    });
+  }
+  // Swords — temporary weapon to kill monsters
+  for (let x = 700; x < TRACK_LENGTH - 500; x += 2000 + Math.random() * 1500) {
+    swords.push({ x, y: GROUND_Y - 28, w: 14, h: 28, collected: false });
+  }
+  // Bees — 10 total, chase the nearest runner, sting causes stun
+  const beeSpacing = (TRACK_LENGTH - 2000) / 10;
+  for (let i = 0; i < 10; i++) {
+    const x = 1000 + i * beeSpacing + Math.random() * beeSpacing * 0.3;
+    bees.push({
+      x, y: GROUND_Y - 100 - Math.random() * 80,
+      homeX: x, homeY: GROUND_Y - 100 - Math.random() * 80,
+      vx: 0, vy: 0, animT: Math.random() * 10,
+      chasing: false, target: null, alive: true
+    });
+  }
+  // Rivers — slow you down, must swim through
+  for (let x = 1500; x < TRACK_LENGTH - 2000; x += 2800 + Math.random() * 2000) {
+    rivers.push({ x, w: 200 + Math.random() * 150 });
+  }
+  // Friendly pandas — exactly 10, evenly spaced
+  const pandaSpacing = (TRACK_LENGTH - 2100) / 10;
+  for (let i = 0; i < 10; i++) {
+    const x = 600 + i * pandaSpacing + Math.random() * pandaSpacing * 0.3;
+    pandas.push({
+      x, y: GROUND_Y - 40, w: 44, h: 40,
+      speed: 5 + Math.random() * 1.5, alive: true,
+      rider: null, animT: 0, running: false
+    });
+  }
+}
+
+function startGame() {
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('end-screen').style.display = 'none';
+  player = new Runner('你', '#e8b830', '#d4a017', true);
+  npc1 = new Runner('阿豹', '#e74c3c', '#c0392b', false, 0.45);
+  npc2 = new Runner('小猴', '#3498db', '#2980b9', false, 0.68);
+  runners = [player, npc1, npc2];
+  generateLevel();
+  gameTime = 0;
+  cameraX = 0;
+  particles = [];
+  gameState = 'playing';
+  canvas.focus();
+}
+
+function endGame() {
+  gameState = 'ended';
+  const sorted = [...runners].sort((a, b) => {
+    if (a.finished && !b.finished) return -1;
+    if (!a.finished && b.finished) return 1;
+    if (a.finished && b.finished) return a.finishTime - b.finishTime;
+    return b.distance - a.distance;
+  });
+  const t = document.getElementById('end-title');
+  const s = document.getElementById('end-subtitle');
+  const r = document.getElementById('results');
+  if (sorted[0].isPlayer) {
+    t.textContent = '恭喜你赢了!'; t.style.color = '#4ade80';
+    s.textContent = sorted[0].finished ? `用时 ${sorted[0].finishTime.toFixed(1)}秒 到达终点!` : '你跑得最远!';
+  } else {
+    t.textContent = '比赛结束'; t.style.color = '#f87171';
+    s.textContent = `${sorted[0].name} 获得了第一名!`;
+  }
+  r.innerHTML = sorted.map((runner, i) => {
+    const medal = ['🥇', '🥈', '🥉'][i];
+    const info = runner.finished ? `${runner.finishTime.toFixed(1)}秒完赛` : `${Math.floor(runner.distance)}m`;
+    return `<div class="result-row ${i === 0 ? 'winner' : ''}">${medal} ${runner.name} — ${info}</div>`;
+  }).join('');
+  document.getElementById('end-screen').style.display = 'flex';
+}
+
+function update() {
+  if (gameState !== 'playing') return;
+  gameTime += DT;
+  for (const r of runners) r.update(keys);
+
+
+  // Update monsters
+  for (const m of monsters) {
+    if (m.dead) continue;
+    m.animT += DT;
+    m.mouthOpen = Math.sin(m.animT * 5) > 0;
+    m.x += m.speed * m.dir;
+    if (m.x > m.originX + m.range) m.dir = -1;
+    if (m.x < m.originX - m.range) m.dir = 1;
+    // Check collision with runners
+    for (const r of runners) {
+      if (r.finished || r.stunTimer > 0) continue;
+      if (r.ridingPanda && !r.hasSword) continue;
+      if (r.x + PLAYER_W - 6 > m.x && r.x + 6 < m.x + m.w &&
+          r.y + PLAYER_H > m.y && r.y < m.y + m.h) {
+        if (r.hasSword) {
+          // Sword kills monster!
+          m.dead = true;
+          for (let k = 0; k < 12; k++) {
+            particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2, vx: (Math.random() - 0.5) * 7, vy: -2 - Math.random() * 5, life: 30, color: k % 2 === 0 ? '#a855f7' : '#facc15' });
+          }
+        } else {
+          r.x = 80; r.y = GROUND_Y - PLAYER_H;
+          r.vx = 0; r.vy = 0; r.stamina = 100; r.stunTimer = 1;
+          r.hasSword = false; r.swordTimer = 0;
+          for (let k = 0; k < 10; k++) {
+            particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2, vx: (Math.random() - 0.5) * 6, vy: -2 - Math.random() * 4, life: 25, color: '#ef4444' });
+          }
+        }
+      }
+    }
+    // Monster eats panda (unless rider has sword — kills monster instead)
+    for (const p of pandas) {
+      if (!p.alive) continue;
+      if (Math.abs(m.x - p.x) < 30 && Math.abs(m.y - p.y) < 30) {
+        if (p.rider && p.rider.hasSword) {
+          // Sword rider protects panda — kill monster
+          m.dead = true;
+          for (let k = 0; k < 12; k++) {
+            particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2, vx: (Math.random() - 0.5) * 7, vy: -2 - Math.random() * 5, life: 30, color: k % 2 === 0 ? '#a855f7' : '#facc15' });
+          }
+        } else {
+          p.alive = false;
+          if (p.rider) { p.rider.ridingPanda = null; p.rider.stunTimer = 0.5; }
+          p.rider = null;
+          for (let k = 0; k < 12; k++) {
+            particles.push({ x: p.x + p.w / 2, y: p.y + p.h / 2, vx: (Math.random() - 0.5) * 5, vy: -2 - Math.random() * 3, life: 22, color: '#fff' });
+          }
+        }
+      }
+    }
+  }
+
+  // Update pandas
+  for (const p of pandas) {
+    if (!p.alive) continue;
+    p.animT += DT;
+    if (p.vy === undefined) p.vy = 0;
+    if (p.onGround === undefined) p.onGround = true;
+    if (p.crouching === undefined) p.crouching = false;
+    if (p.jumpCD === undefined) p.jumpCD = 0;
+    p.jumpCD--;
+
+    // Runner mount
+    if (!p.rider) {
+      for (const r of runners) {
+        if (r.finished || r.ridingPanda || r.stunTimer > 0) continue;
+        if (Math.abs(r.x - p.x) < 35 && r.y + PLAYER_H > p.y && r.y < p.y + p.h) {
+          p.rider = r;
+          r.ridingPanda = p;
+          p.running = true;
+          p.rideTimer = 8;
+          break;
+        }
+      }
+    }
+
+    // Only move when ridden
+    if (p.running) {
+      // Check if in water
+      let inWater = false;
+      for (const rv of rivers) {
+        if (p.x + p.w > rv.x && p.x < rv.x + rv.w) { inWater = true; break; }
+      }
+
+      // Look ahead for obstacles
+      let needJump = false, needCrouch = false;
+      for (const obs of obstacles) {
+        const dx = obs.x - p.x;
+        if (dx > -10 && dx < 140) {
+          if (obs.type === 'low') needJump = true;
+        }
+        if (obs.type === 'high') {
+          if (dx > -(obs.w + p.w) && dx < 140) needCrouch = true;
+        }
+      }
+      // Check for platforms to jump onto
+      for (const pl of platforms) {
+        const dx = pl.x - p.x;
+        if (dx > 0 && dx < 100 && pl.y < p.y) needJump = true;
+      }
+
+      // Jump — stronger in water to clear obstacles
+      if (needJump && p.onGround && p.jumpCD <= 0) {
+        p.vy = inWater ? -15 : -13;
+        p.onGround = false;
+        p.jumpCD = 18;
+      }
+      // Crouch
+      p.crouching = needCrouch && !needJump && p.onGround;
+
+      // Movement
+      const spd = inWater ? p.speed * 0.45 : (p.crouching ? p.speed * 0.5 : p.speed);
+      p.x += spd;
+
+      // Gravity
+      p.vy += GRAVITY;
+      p.y += p.vy;
+
+      // Ground collision
+      const pandaH = p.crouching ? p.h * 0.6 : p.h;
+      const pandaGroundY = GROUND_Y - pandaH;
+      p.onGround = false;
+      if (p.y >= pandaGroundY) {
+        p.y = pandaGroundY;
+        p.vy = 0;
+        p.onGround = true;
+      }
+      // Platform collision
+      for (const pl of platforms) {
+        if (pl.trunk) continue;
+        if (p.vy >= 0 && p.x + p.w - 5 > pl.x && p.x + 5 < pl.x + pl.w &&
+            p.y + pandaH >= pl.y && p.y + pandaH <= pl.y + 14) {
+          p.y = pl.y - pandaH;
+          p.vy = 0;
+          p.onGround = true;
+        }
+      }
+
+      // Obstacle collision (low obstacles — only block if on ground)
+      if (p.onGround) {
+        const pcy = p.crouching ? p.y + p.h * 0.4 : p.y;
+        const pch = p.crouching ? p.h * 0.6 : p.h;
+        for (const obs of obstacles) {
+          if (obs.type === 'low' &&
+              p.x + p.w - 5 > obs.x && p.x + 5 < obs.x + obs.w &&
+              pcy + pch > obs.y && pcy < obs.y + obs.h) {
+            p.x = obs.x - p.w;
+          }
+        }
+      }
+    }
+
+    // Move rider with panda
+    if (p.rider) {
+      p.rideTimer -= DT;
+      if (p.rideTimer <= 0) {
+        // Time's up — auto dismount
+        p.rider.ridingPanda = null;
+        p.rider.vy = -8;
+        p.rider = null;
+      } else {
+        p.rider.x = p.x + p.w / 2 - PLAYER_W / 2;
+        p.rider.y = p.y - PLAYER_H + 10;
+        p.rider.vx = p.running ? p.speed : 0;
+        p.rider.onGround = p.onGround;
+      }
+    }
+    // Panda disappears at end of track
+    if (p.x > TRACK_LENGTH + 100) {
+      if (p.rider) { p.rider.ridingPanda = null; }
+      p.alive = false;
+    }
+  }
+
+  // Update bees
+  for (const b of bees) {
+    if (!b.alive) continue;
+    b.animT += DT;
+    // Find nearest runner within detection range
+    let nearest = null, nearDist = 250;
+    for (const r of runners) {
+      if (r.finished || r.stunTimer > 0) continue;
+      const dx = r.x - b.x, dy = r.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < nearDist) { nearest = r; nearDist = dist; }
+    }
+    if (nearest) {
+      // Chase
+      b.chasing = true;
+      b.target = nearest;
+      const dx = nearest.x + PLAYER_W / 2 - b.x;
+      const dy = nearest.y + PLAYER_H / 2 - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const spd = 3.5;
+      b.vx += (dx / dist) * 0.3;
+      b.vy += (dy / dist) * 0.3;
+      b.vx = Math.max(-spd, Math.min(spd, b.vx));
+      b.vy = Math.max(-spd, Math.min(spd, b.vy));
+      // Sting — contact with runner
+      if (dist < 20) {
+        nearest.stunTimer = 2;
+        nearest.vx = 0; nearest.vy = -5;
+        if (nearest.ridingPanda) { nearest.ridingPanda.rider = null; nearest.ridingPanda = null; }
+        b.alive = false;
+        for (let k = 0; k < 6; k++) {
+          particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 4, vy: -1 - Math.random() * 2, life: 15, color: '#fbbf24' });
+        }
+      }
+    } else {
+      // Return to home
+      b.chasing = false;
+      const dx = b.homeX - b.x, dy = b.homeY - b.y;
+      b.vx += dx * 0.01;
+      b.vy += dy * 0.01;
+      b.vx *= 0.95; b.vy *= 0.95;
+    }
+    b.x += b.vx;
+    b.y += b.vy;
+    // Sword kills bee
+    for (const r of runners) {
+      if (r.hasSword && Math.abs(r.x - b.x) < 30 && Math.abs(r.y - b.y) < 40) {
+        b.alive = false;
+        for (let k = 0; k < 6; k++) {
+          particles.push({ x: b.x, y: b.y, vx: (Math.random() - 0.5) * 4, vy: -2 - Math.random() * 2, life: 18, color: '#facc15' });
+        }
+      }
+    }
+  }
+
+  cameraX += (player.x - W * 0.3 - cameraX) * 0.1;
+  cameraX = Math.max(0, cameraX);
+  for (const c of clouds) c.x += c.speed;
+
+  if (player.sprinting && Math.random() < 0.4) {
+    particles.push({ x: player.x, y: player.y + PLAYER_H - 5, vx: -1.5 - Math.random() * 2, vy: -Math.random(), life: 15, color: '#f5d0a9' });
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.x += p.vx; p.y += p.vy; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  if (runners.every(r => r.finished) || gameTime >= GAME_DURATION) endGame();
+}
+
+// ===== DRAWING =====
+
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0b3520'); g.addColorStop(0.35, '#145a30');
+  g.addColorStop(0.65, '#1e8040'); g.addColorStop(1, '#2d6a1e');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // Light rays
+  const sg = ctx.createRadialGradient(W * 0.72, 30, 5, W * 0.72, 30, 220);
+  sg.addColorStop(0, 'rgba(255,245,160,0.28)'); sg.addColorStop(1, 'rgba(255,245,160,0)');
+  ctx.fillStyle = sg; ctx.fillRect(0, 0, W, H);
+}
+
+function drawClouds() {
+  ctx.globalAlpha = 0.12;
+  for (const c of clouds) {
+    const sx = c.x - cameraX * 0.08;
+    if (sx > -c.w && sx < W + c.w) {
+      ctx.fillStyle = '#90d890';
+      ctx.beginPath(); ctx.ellipse(sx, c.y, c.w / 2, 14, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawDeco(layer) {
+  const par = [0.25, 0.55, 0.85][layer];
+  const alpha = [0.3, 0.5, 0.85][layer];
+  ctx.globalAlpha = alpha;
+  for (const d of decorations) {
+    if (d.layer !== layer) continue;
+    const sx = d.x - cameraX * par;
+    if (sx < -200 || sx > W + 200) continue;
+    if (d.type === 'tree') {
+      ctx.fillStyle = '#4a2810';
+      ctx.fillRect(sx - 7, GROUND_Y - d.h, 14, d.h);
+      const gc = LEAF_GREENS[Math.floor(d.x * 0.1) % LEAF_GREENS.length];
+      ctx.fillStyle = gc;
+      ctx.beginPath(); ctx.ellipse(sx, GROUND_Y - d.h - 5, 30 + d.h * 0.18, 35 + d.h * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = LEAF_GREENS[(Math.floor(d.x * 0.1) + 2) % LEAF_GREENS.length];
+      ctx.beginPath(); ctx.ellipse(sx - 12, GROUND_Y - d.h + 8, 22, 26, 0, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = LEAF_GREENS[Math.floor(d.x * 0.05) % LEAF_GREENS.length];
+      ctx.beginPath(); ctx.ellipse(sx, GROUND_Y - d.h / 2, d.w / 2, d.h / 2, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawGround() {
+  const g = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+  g.addColorStop(0, '#3d2b1a'); g.addColorStop(0.4, '#2a1f0f'); g.addColorStop(1, '#1a1208');
+  ctx.fillStyle = g; ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+  ctx.fillStyle = '#2d8a2d'; ctx.fillRect(0, GROUND_Y - 3, W, 6);
+  for (let x = 0; x < W; x += 7) {
+    const h = 3 + Math.sin((x + cameraX) * 0.12 + gameTime * 2.5) * 3;
+    ctx.fillStyle = '#3daa3d'; ctx.fillRect(x, GROUND_Y - h, 2, h);
+  }
+}
+
+function drawPlatforms() {
+  for (const p of platforms) {
+    const sx = p.x - cameraX;
+    if (sx > W + 10 || sx + p.w < -10) continue;
+    if (p.trunk) {
+      // Tree trunk
+      ctx.fillStyle = '#5a3518';
+      ctx.fillRect(sx, p.y, p.w, p.h);
+      // Bark texture
+      ctx.fillStyle = '#6d4420';
+      ctx.fillRect(sx + 3, p.y, 6, p.h);
+      ctx.fillStyle = '#4a2a10';
+      ctx.fillRect(sx + 12, p.y, 4, p.h);
+      // Canopy at top
+      ctx.fillStyle = '#1a6a1a';
+      ctx.beginPath(); ctx.ellipse(sx + p.w / 2, p.y - 10, 40, 35, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#228a22';
+      ctx.beginPath(); ctx.ellipse(sx + p.w / 2 - 12, p.y, 28, 25, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#15751a';
+      ctx.beginPath(); ctx.ellipse(sx + p.w / 2 + 15, p.y - 5, 25, 22, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (p.tree) {
+      // Tree branch platform
+      ctx.fillStyle = '#5a3518';
+      ctx.fillRect(sx, p.y, p.w, p.h);
+      ctx.fillStyle = '#6d4420';
+      ctx.fillRect(sx + 2, p.y + 2, p.w - 4, 4);
+      // Leaves on branch
+      ctx.fillStyle = '#2d8a2d';
+      for (let lx = sx + 5; lx < sx + p.w; lx += 14) {
+        ctx.beginPath(); ctx.ellipse(lx, p.y - 4, 8, 6, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      // Regular wooden platform
+      ctx.fillStyle = '#5a3d20'; ctx.fillRect(sx, p.y, p.w, p.h);
+      ctx.fillStyle = '#7a5a30'; ctx.fillRect(sx + 2, p.y + 2, p.w - 4, 5);
+      ctx.fillStyle = '#4a8a4a'; ctx.fillRect(sx, p.y - 2, p.w, 3);
+    }
+  }
+}
+
+function drawObstacles() {
+  for (const obs of obstacles) {
+    const sx = obs.x - cameraX;
+    if (sx > W + 10 || sx + obs.w < -10) continue;
+    if (obs.type === 'low') {
+      if (obs.style === 'log') {
+        ctx.fillStyle = '#5a3d1a'; ctx.fillRect(sx, obs.y, obs.w, obs.h);
+        ctx.fillStyle = '#6d4c2a'; ctx.fillRect(sx + 3, obs.y + 3, obs.w - 6, obs.h - 6);
+        ctx.strokeStyle = '#4a2810'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(sx, obs.y + obs.h / 2, 5, obs.h / 2 - 2, 0, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        ctx.fillStyle = '#6a6a6a';
+        ctx.beginPath();
+        ctx.moveTo(sx, obs.y + obs.h); ctx.lineTo(sx + 5, obs.y + 5);
+        ctx.lineTo(sx + obs.w * 0.4, obs.y); ctx.lineTo(sx + obs.w * 0.7, obs.y + 3);
+        ctx.lineTo(sx + obs.w, obs.y + obs.h); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#4a8a4a'; ctx.fillRect(sx + 5, obs.y + 2, 8, 3);
+      }
+    } else {
+      ctx.strokeStyle = '#3d6a1a'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(sx, obs.y + obs.h / 2); ctx.lineTo(sx + obs.w, obs.y + obs.h / 2); ctx.stroke();
+      for (let lx = sx + 4; lx < sx + obs.w; lx += 10) {
+        ctx.fillStyle = LEAF_GREENS[Math.floor(lx * 0.1) % LEAF_GREENS.length];
+        ctx.beginPath(); ctx.ellipse(lx, obs.y + obs.h + 2, 5, 9, 0.2, 0, Math.PI * 2); ctx.fill();
+      }
+      // Warning tint
+      ctx.fillStyle = 'rgba(255,220,0,0.12)'; ctx.fillRect(sx, obs.y - 2, obs.w, obs.h + 6);
+    }
+  }
+}
+
+function drawRivers() {
+  for (const rv of rivers) {
+    const sx = rv.x - cameraX;
+    if (sx > W + 10 || sx + rv.w < -10) continue;
+    // Dig out ground — water fills the gap
+    ctx.fillStyle = '#0a3060';
+    ctx.fillRect(sx, GROUND_Y - 6, rv.w, 50);
+    // Water body
+    const wg = ctx.createLinearGradient(0, GROUND_Y - 6, 0, GROUND_Y + 40);
+    wg.addColorStop(0, '#1e6ec0');
+    wg.addColorStop(0.4, '#1558a8');
+    wg.addColorStop(1, '#0d3870');
+    ctx.fillStyle = wg;
+    ctx.fillRect(sx, GROUND_Y - 6, rv.w, 46);
+    // Surface ripples — animated
+    ctx.strokeStyle = 'rgba(160,220,255,0.7)';
+    ctx.lineWidth = 1.5;
+    for (let rx = sx; rx < sx + rv.w; rx += 16) {
+      const ry = GROUND_Y - 4 + Math.sin(rx * 0.08 + gameTime * 3) * 2;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.quadraticCurveTo(rx + 5, ry - 3, rx + 10, ry);
+      ctx.stroke();
+    }
+    // Foam at edges
+    ctx.fillStyle = 'rgba(200,235,255,0.6)';
+    ctx.fillRect(sx, GROUND_Y - 8, 8, 6);
+    ctx.fillRect(sx + rv.w - 8, GROUND_Y - 8, 8, 6);
+    // Bank edges — green dirt
+    ctx.fillStyle = '#2d5a1e';
+    ctx.fillRect(sx - 5, GROUND_Y - 8, 7, 52);
+    ctx.fillRect(sx + rv.w - 2, GROUND_Y - 8, 7, 52);
+  }
+}
+
+function drawBees() {
+  for (const b of bees) {
+    if (!b.alive) continue;
+    const sx = b.x - cameraX;
+    if (sx < -30 || sx > W + 30) continue;
+
+    ctx.save();
+    ctx.translate(sx, b.y);
+
+    // Wings — flapping
+    const wingAngle = Math.sin(b.animT * 30) * 0.4;
+    ctx.fillStyle = 'rgba(220,240,255,0.6)';
+    ctx.save();
+    ctx.rotate(-0.3 + wingAngle);
+    ctx.beginPath(); ctx.ellipse(-3, -6, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.rotate(0.3 - wingAngle);
+    ctx.beginPath(); ctx.ellipse(3, -6, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // Body — yellow with black stripes
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath(); ctx.ellipse(0, 0, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-6, -2, 12, 2);
+    ctx.fillRect(-5, 2, 10, 2);
+
+    // Head
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(7, 0, 3, 0, Math.PI * 2); ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = b.chasing ? '#ef4444' : '#fff';
+    ctx.beginPath(); ctx.arc(9, -1, 1.5, 0, Math.PI * 2); ctx.fill();
+
+    // Stinger
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.moveTo(-7, 0); ctx.lineTo(-11, 0); ctx.lineTo(-7, 1);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Alert indicator when chasing
+    if (b.chasing) {
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('!', sx, b.y - 12);
+    }
+  }
+}
+
+function drawSwords() {
+  for (const s of swords) {
+    if (s.collected) continue;
+    const sx = s.x - cameraX;
+    if (sx < -20 || sx > W + 20) continue;
+    const cx = sx + s.w / 2;
+    // Float animation
+    const bob = Math.sin(gameTime * 3 + s.x) * 3;
+    // Glow
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.arc(cx, s.y + s.h / 2 + bob, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Blade
+    ctx.fillStyle = '#e2e8f0';
+    ctx.beginPath();
+    ctx.moveTo(cx - 2, s.y + bob + 2);
+    ctx.lineTo(cx, s.y + bob - 6);
+    ctx.lineTo(cx + 2, s.y + bob + 2);
+    ctx.lineTo(cx + 2, s.y + s.h + bob - 6);
+    ctx.lineTo(cx - 2, s.y + s.h + bob - 6);
+    ctx.closePath(); ctx.fill();
+    // Edge highlight
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(cx - 1, s.y + bob - 4, 1, s.h - 4);
+    // Guard
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(cx - 6, s.y + s.h + bob - 8, 12, 3);
+    // Grip
+    ctx.fillStyle = '#92400e';
+    ctx.fillRect(cx - 2, s.y + s.h + bob - 5, 4, 8);
+    // Pommel
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.arc(cx, s.y + s.h + bob + 4, 3, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawPandas() {
+  for (const p of pandas) {
+    if (!p.alive) continue;
+    const sx = p.x - cameraX;
+    if (sx < -60 || sx > W + 60) continue;
+    const drawH = p.crouching ? p.h * 0.6 : p.h;
+    const cx = sx + p.w / 2, cy = p.y + drawH / 2;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (p.crouching) ctx.scale(1, 0.6);
+
+    // Body — white oval
+    ctx.fillStyle = '#f5f5f5';
+    ctx.beginPath(); ctx.ellipse(0, 2, p.w / 2 - 2, p.h / 2 - 2, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Belly
+    ctx.fillStyle = '#e8e8e8';
+    ctx.beginPath(); ctx.ellipse(0, 6, 12, 10, 0, 0, Math.PI); ctx.fill();
+
+    // Ears — black
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(-12, -14, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(12, -14, 6, 0, Math.PI * 2); ctx.fill();
+
+    // Eye patches — black
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.ellipse(-7, -3, 6, 5, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(7, -3, 6, 5, 0.2, 0, Math.PI * 2); ctx.fill();
+
+    // Eyes — white dots
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-6, -3, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(8, -3, 2.5, 0, Math.PI * 2); ctx.fill();
+
+    // Nose
+    ctx.fillStyle = '#333';
+    ctx.beginPath(); ctx.ellipse(0, 3, 3, 2, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Smile
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 4, 4, 0.1, Math.PI - 0.1); ctx.stroke();
+
+    // Legs — animated
+    const legBob = p.running ? Math.sin(p.animT * 10) * 4 : 0;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-14, p.h / 2 - 10, 8, 10 + legBob);
+    ctx.fillRect(6, p.h / 2 - 10, 8, 10 - legBob);
+
+    ctx.restore();
+
+    // Friendly glow
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = '#4ade80';
+    ctx.beginPath(); ctx.arc(sx + p.w / 2, p.y + p.h / 2, 28, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawMonsters() {
+  for (const m of monsters) {
+    if (m.dead) continue;
+    const sx = m.x - cameraX;
+    if (sx < -50 || sx > W + 50) continue;
+    const cx = sx + m.w / 2, cy = m.y + m.h / 2;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (m.dir < 0) ctx.scale(-1, 1);
+
+    // Body - dark purple beast
+    ctx.fillStyle = '#5b21b6';
+    ctx.beginPath();
+    ctx.ellipse(0, 4, m.w / 2, m.h / 2 - 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Darker belly
+    ctx.fillStyle = '#4c1d95';
+    ctx.beginPath();
+    ctx.ellipse(0, 8, m.w / 2 - 4, m.h / 2 - 10, 0, 0, Math.PI);
+    ctx.fill();
+
+    // Eyes - menacing red
+    ctx.fillStyle = '#fef08a';
+    ctx.beginPath(); ctx.arc(-6, -4, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(6, -4, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath(); ctx.arc(-5, -4, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(7, -4, 2.5, 0, Math.PI * 2); ctx.fill();
+
+    // Mouth
+    if (m.mouthOpen) {
+      ctx.fillStyle = '#991b1b';
+      ctx.beginPath();
+      ctx.ellipse(2, 8, 8, 5, 0, 0, Math.PI);
+      ctx.fill();
+      // Teeth
+      ctx.fillStyle = '#fff';
+      for (let t = -5; t <= 5; t += 5) {
+        ctx.beginPath();
+        ctx.moveTo(t - 2, 6); ctx.lineTo(t, 9); ctx.lineTo(t + 2, 6);
+        ctx.fill();
+      }
+    }
+
+    // Spikes on top
+    ctx.fillStyle = '#7c3aed';
+    for (let s = -10; s <= 10; s += 7) {
+      ctx.beginPath();
+      ctx.moveTo(s - 3, -m.h / 2 + 6); ctx.lineTo(s, -m.h / 2 - 4); ctx.lineTo(s + 3, -m.h / 2 + 6);
+      ctx.fill();
+    }
+
+    // Legs - little stumps that animate
+    const legBob = Math.sin(m.animT * 8) * 3;
+    ctx.fillStyle = '#4c1d95';
+    ctx.fillRect(-12, m.h / 2 - 8, 7, 8 + legBob);
+    ctx.fillRect(5, m.h / 2 - 8, 7, 8 - legBob);
+
+    ctx.restore();
+
+    // Danger indicator - subtle red glow
+    ctx.globalAlpha = 0.15 + Math.sin(m.animT * 3) * 0.08;
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath(); ctx.arc(sx + m.w / 2, m.y + m.h / 2, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawFruits() {
+  for (const f of fruits) {
+    if (f.collected) continue;
+    const sx = f.x - cameraX;
+    if (sx < -20 || sx > W + 20) continue;
+    const cx = sx + f.w / 2, cy = f.y + f.h / 2;
+    const isPoison = f.poison;
+    // Glow
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = isPoison ? '#ef4444' : '#4ade80';
+    ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Fruit body
+    ctx.fillStyle = isPoison ? '#dc2626' : '#22c55e';
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+    // Highlight
+    ctx.fillStyle = isPoison ? '#fca5a5' : '#86efac';
+    ctx.beginPath(); ctx.arc(cx - 2, cy - 3, 3, 0, Math.PI * 2); ctx.fill();
+    // Stem and leaf
+    ctx.strokeStyle = isPoison ? '#7f1d1d' : '#166534'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx + 2, cy - 12); ctx.stroke();
+    ctx.fillStyle = '#15803d';
+    ctx.beginPath(); ctx.ellipse(cx + 5, cy - 11, 4, 2, 0.4, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawFinish() {
+  const sx = TRACK_LENGTH - cameraX;
+  if (sx < -50 || sx > W + 50) return;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 2; c++) {
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#fff' : '#111';
+      ctx.fillRect(sx + c * 14, GROUND_Y - 96 + r * 12, 14, 12);
+    }
+  }
+  ctx.fillStyle = '#6b3510'; ctx.fillRect(sx + 11, GROUND_Y - 96, 6, 96);
+  ctx.fillStyle = '#ff4444'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('终 点', sx + 14, GROUND_Y - 102);
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = Math.min(p.life / 15, 1);
+    ctx.fillStyle = p.color; ctx.fillRect(p.x - cameraX, p.y, 3, 3);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawVines() {
+  ctx.globalAlpha = 0.35;
+  for (let x = 10; x < W; x += 70 + Math.sin(x * 0.015) * 30) {
+    const wx = x + cameraX * 0.4;
+    ctx.fillStyle = LEAF_GREENS[Math.floor(wx * 0.008) % LEAF_GREENS.length];
+    const vl = 18 + Math.sin(wx * 0.018 + gameTime * 1.2) * 10;
+    ctx.beginPath(); ctx.ellipse(x, vl / 2 - 2, 10, vl, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+  // Top bar background
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, W, 52);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 52, W, 2);
+
+  // Stamina
+  ctx.fillStyle = '#333'; ctx.fillRect(14, 10, 160, 20);
+  ctx.strokeStyle = '#666'; ctx.lineWidth = 1; ctx.strokeRect(14, 10, 160, 20);
+  const sw = (player.stamina / 100) * 156;
+  const sc = player.stamina > 50 ? '#4ade80' : player.stamina > 20 ? '#fbbf24' : '#ef4444';
+  ctx.fillStyle = sc; ctx.fillRect(16, 12, sw, 16);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'left';
+  ctx.fillText(`体力 ${Math.floor(player.stamina)}%`, 22, 25);
+
+  // Timer
+  const tl = Math.max(0, GAME_DURATION - gameTime);
+  ctx.fillStyle = tl < 10 ? '#ef4444' : '#fff';
+  ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center';
+  ctx.fillText(`${Math.ceil(tl)}s`, W / 2, 32);
+
+  // Status
+  ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left';
+  if (player.hasSword) {
+    ctx.fillStyle = '#facc15'; ctx.fillText(`剑 ${Math.ceil(player.swordTimer)}s`, 16, 46);
+  } else if (player.sprinting) {
+    ctx.fillStyle = '#fbbf24'; ctx.fillText('加速中!', 16, 46);
+  } else if (player.crouching) {
+    ctx.fillStyle = '#60a5fa'; ctx.fillText('下蹲', 16, 46);
+  } else {
+    ctx.fillStyle = '#aaa'; ctx.fillText(`${Math.floor(player.distance)}m`, 16, 46);
+  }
+
+  // Minimap
+  const mw = 260, mh = 24, mx = W - mw - 16, my = 12;
+  ctx.fillStyle = '#222'; ctx.fillRect(mx - 2, my - 2, mw + 4, mh + 4);
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(mx - 2, my - 2, mw + 4, mh + 4);
+  const tg = ctx.createLinearGradient(mx, 0, mx + mw, 0);
+  tg.addColorStop(0, '#1a3a1a'); tg.addColorStop(1, '#2a6a2a');
+  ctx.fillStyle = tg; ctx.fillRect(mx, my, mw, mh);
+  // finish marker
+  ctx.fillStyle = '#ff4444'; ctx.fillRect(mx + mw - 3, my, 3, mh);
+  // runners
+  for (const r of runners) {
+    const rx = mx + Math.min((r.distance / TRACK_LENGTH) * mw, mw);
+    ctx.fillStyle = r.color;
+    ctx.beginPath(); ctx.arc(rx, my + mh / 2, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  ctx.fillStyle = '#999'; ctx.font = '9px Arial';
+  ctx.textAlign = 'left'; ctx.fillText('起点', mx, my + mh + 12);
+  ctx.textAlign = 'right'; ctx.fillText('终点', mx + mw, my + mh + 12);
+
+  // Controls hint
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, H - 24, W, 24);
+  ctx.fillStyle = '#999'; ctx.font = '11px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('A/D:移动  |  W/空格:跳跃  |  S:下蹲  |  Shift:加速', W / 2, H - 8);
+}
+
+function drawCountdown() {
+  if (gameTime < 2) {
+    const t = gameTime;
+    let txt = '', col = '#fff';
+    if (t < 0.6) txt = '3';
+    else if (t < 1.2) txt = '2';
+    else if (t < 1.8) txt = '1';
+    else { txt = 'GO!'; col = '#4ade80'; }
+    const phase = t % 0.6;
+    const a = Math.max(0, 1 - phase / 0.5);
+    const sc = 1 + (1 - a) * 0.3;
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.fillStyle = col; ctx.font = `bold ${55 * sc}px Arial`; ctx.textAlign = 'center';
+    ctx.fillText(txt, W / 2, H / 2 + 10);
+    ctx.restore();
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  drawSky(); drawClouds();
+  drawDeco(0); drawDeco(1);
+  drawFinish(); drawPlatforms(); drawObstacles(); drawFruits(); drawSwords(); drawPandas(); drawMonsters(); drawBees();
+  drawDeco(2); drawGround(); drawRivers(); drawParticles();
+  const sorted = [...runners].sort((a, b) => a.y - b.y);
+  for (const r of sorted) r.draw(cameraX);
+  drawVines(); drawHUD(); drawCountdown();
+}
+
+// ===== LOOP =====
+// Use setInterval for reliable timing even when tab is not focused
+setInterval(() => {
+  update();
+  draw();
+}, 1000 / FPS);
+
+// Input
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.setAttribute('tabindex', '0');
+</script>
+</body>
+</html>
