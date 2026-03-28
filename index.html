@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Zander Chen — 北京 ISB 小学生，个人项目与兴趣展示。"
+    />
+    <title>Zander Chen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <p class="eyebrow">Portfolio</p>
+        <h1 class="title">Zander Chen</h1>
+        <p class="tagline">
+          就读于<span class="nowrap">北京顺义国际学校（ISB）</span>的小学生 — 喜欢动手做项目、探索新事物。
+        </p>
+        <p class="tagline-en" lang="en">
+          Elementary student at the International School of Beijing — projects,
+          curiosity, and things I enjoy.
+        </p>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="section" aria-labelledby="about-heading">
+        <div class="wrap">
+          <h2 id="about-heading">关于我</h2>
+          <p class="lead">
+            这里是 Zander 的个人主页。你可以看到我做过的小项目、正在学的东西，以及一些兴趣爱好。内容会随时间更新。
+          </p>
+        </div>
+      </section>
+
+      <section class="section section--tint" aria-labelledby="projects-heading">
+        <div class="wrap">
+          <h2 id="projects-heading">个人项目</h2>
+          <p class="section-intro">
+            下面是可以替换的示例卡片。把标题、说明和链接改成真实项目即可。
+          </p>
+          <ul class="card-grid">
+            <li>
+              <article class="card">
+                <h3>示例：科学小实验记录</h3>
+                <p>
+                  用图文记录课堂或在家做的实验，练习观察与总结。（可链接到
+                  Notion、博客或 PDF）
+                </p>
+                <span class="card-link card-link--soon">即将更新</span>
+              </article>
+            </li>
+            <li>
+              <article class="card">
+                <h3>示例：编程小作品</h3>
+                <p>
+                  Scratch、Python 小游戏或网页小工具——放仓库链接或在线演示地址。
+                </p>
+                <a class="card-link" href="#">添加链接</a>
+              </article>
+            </li>
+            <li>
+              <article class="card">
+                <h3>示例：阅读与写作</h3>
+                <p>书单、读书笔记或短篇故事，展示你的阅读与表达。</p>
+                <a class="card-link" href="#">添加链接</a>
+              </article>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="interests-heading">
+        <div class="wrap">
+          <h2 id="interests-heading">兴趣与活动</h2>
+          <p class="section-intro">
+            用标签快速展示你喜欢的事；也可以换成照片墙或时间线。
+          </p>
+          <ul class="tags" aria-label="兴趣标签">
+            <li><span class="tag">阅读</span></li>
+            <li><span class="tag">编程</span></li>
+            <li><span class="tag">科学</span></li>
+            <li><span class="tag">运动</span></li>
+            <li><span class="tag">音乐</span></li>
+            <li><span class="tag">艺术</span></li>
+            <li><span class="tag">棋类</span></li>
+            <li><span class="tag">社区服务</span></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>
+          © <span id="year"></span> Zander Chen ·
+          <span lang="en">Built with GitHub Pages</span>
+        </p>
+        <p class="footer-note">
+          在 GitHub 仓库设置中启用 Pages（通常选择 <code>main</code> 分支根目录）即可发布本站。
+        </p>
+      </div>
+    </footer>
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

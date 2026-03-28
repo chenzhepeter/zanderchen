@@ -1,0 +1,241 @@
+:root {
+  --bg: #f6f3ef;
+  --bg-tint: #ebe6df;
+  --ink: #1c1917;
+  --muted: #57534e;
+  --accent: #0d9488;
+  --accent-soft: rgba(13, 148, 136, 0.12);
+  --card: #ffffff;
+  --shadow: 0 12px 40px rgba(28, 25, 23, 0.08);
+  --radius: 14px;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 0.75rem 1rem;
+  background: var(--ink);
+  color: #fff;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+}
+
+.wrap {
+  width: min(100% - 2rem, 720px);
+  margin-inline: auto;
+}
+
+.site-header {
+  padding: clamp(3rem, 10vw, 5rem) 0 clamp(2.5rem, 6vw, 3.5rem);
+  background:
+    radial-gradient(
+      ellipse 120% 80% at 100% 0%,
+      var(--accent-soft),
+      transparent 55%
+    ),
+    linear-gradient(180deg, #fff 0%, var(--bg) 100%);
+  border-bottom: 1px solid rgba(28, 25, 23, 0.06);
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.title {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 6vw, 3.25rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0 0 0.5rem;
+  max-width: 36em;
+  color: var(--muted);
+}
+
+.tagline-en {
+  margin: 0;
+  max-width: 38em;
+  font-size: 0.95rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.section {
+  padding: clamp(2.5rem, 6vw, 3.5rem) 0;
+}
+
+.section--tint {
+  background: var(--bg-tint);
+}
+
+.section h2 {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+  font-weight: 600;
+}
+
+.lead,
+.section-intro {
+  margin: 0;
+  color: var(--muted);
+  max-width: 40em;
+}
+
+.section-intro {
+  margin-bottom: 1.5rem;
+  font-size: 0.98rem;
+}
+
+.card-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 560px) {
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+}
+
+.card {
+  height: 100%;
+  margin: 0;
+  padding: 1.35rem 1.4rem;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  border: 1px solid rgba(28, 25, 23, 0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 48px rgba(28, 25, 23, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card:hover {
+    transform: none;
+  }
+}
+
+.card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.card p {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.card-link {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.card-link:hover {
+  text-decoration: underline;
+}
+
+.card-link--soon {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: var(--card);
+  border-radius: 999px;
+  border: 1px solid rgba(28, 25, 23, 0.08);
+  box-shadow: 0 2px 8px rgba(28, 25, 23, 0.04);
+}
+
+.site-footer {
+  padding: 2rem 0 2.5rem;
+  border-top: 1px solid rgba(28, 25, 23, 0.08);
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.site-footer p {
+  margin: 0 0 0.5rem;
+}
+
+.footer-note {
+  max-width: 40em;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.site-footer code {
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  background: var(--bg-tint);
+  border-radius: 4px;
+}
