@@ -176,12 +176,18 @@ export class Entity {
       hpBar.position.x = (ratio - 1) * 0.4;
       hpBar.material.color.setHex(ratio > 0.5 ? 0x00ff00 : ratio > 0.25 ? 0xffff00 : 0xff0000);
 
-      // Face camera
+      // Billboard: counter-rotate bars so they always face the camera
+      // The parent group is rotated by this.yaw, so we negate it and add camera yaw
       const cam = this.game.camera;
+      const camDir = new THREE.Vector3();
+      cam.getWorldDirection(camDir);
+      const camYaw = Math.atan2(-camDir.x, -camDir.z);
+      const localYaw = camYaw - this.yaw;
+
       const hpBg = this.mesh.getObjectByName('hpBarBg');
       [hpBar, hpBg].forEach(bar => {
         if (bar) {
-          bar.lookAt(cam.position);
+          bar.rotation.set(0, localYaw, 0);
         }
       });
     }
@@ -234,8 +240,9 @@ export class Entity {
       if (this.velocity.y < 0) {
         this.position.y = Math.floor(this.position.y) + 1.001;
         this.onGround = true;
+      } else {
+        this.position.y -= this.velocity.y * dt;
       }
-      this.position.y -= this.velocity.y * dt;
       this.velocity.y = 0;
     } else {
       this.onGround = false;
@@ -337,7 +344,7 @@ export class NPCEntity extends Entity {
     this.jumpTimer = 0;
     this.stuckTimer = 0;
     this.lastPosition = position.clone();
-    this.buyTimer = 5 + Math.random() * 5;
+    this.buyTimer = 3 + Math.random() * 3;
     this.gatherTimer = 0;
     this.wanderTarget = null;
 
@@ -378,7 +385,7 @@ export class NPCEntity extends Entity {
 
     // Auto-buy when near spawner
     if (this.buyTimer <= 0) {
-      this.buyTimer = 8 + Math.random() * 5;
+      this.buyTimer = 4 + Math.random() * 3;
       this._autoBuy();
     }
 
@@ -387,12 +394,18 @@ export class NPCEntity extends Entity {
 
     // Stuck detection
     this.stuckTimer += dt;
-    if (this.stuckTimer > 1) {
+    if (this.stuckTimer > 0.8) {
       const dist = this.position.distanceTo(this.lastPosition);
-      if (dist < 0.2 && this.state !== 'idle' && this.state !== 'buy') {
+      if (dist < 0.3 && this.state !== 'idle' && this.state !== 'buy') {
         if (this.onGround) {
-          this.velocity.y = 8;
+          // Jump higher and nudge sideways to escape
+          this.velocity.y = 9;
           this.onGround = false;
+          // Add a sideways nudge to avoid getting stuck in the same spot
+          const sideX = (Math.random() - 0.5) * 4;
+          const sideZ = (Math.random() - 0.5) * 4;
+          this.velocity.x += sideX;
+          this.velocity.z += sideZ;
         }
       }
       this.lastPosition.copy(this.position);
@@ -410,19 +423,20 @@ export class NPCEntity extends Entity {
   }
 
   _autoBuy() {
+    // Priority: weapon > blocks > armor
     if (!this.hasWeapon && this.currency.copper >= 8) {
       this.hasWeapon = true;
       this.damage = 5;
       this.currency.copper -= 8;
     }
+    if (this.blockCount < 32 && this.currency.copper >= 2) {
+      this.blockCount += 16;
+      this.currency.copper -= 2;
+    }
     if (!this.hasArmor && this.currency.copper >= 6) {
       this.hasArmor = true;
       this.armor = 2;
       this.currency.copper -= 6;
-    }
-    if (this.blockCount < 16 && this.currency.copper >= 2) {
-      this.blockCount += 16;
-      this.currency.copper -= 2;
     }
   }
 
@@ -460,6 +474,19 @@ export class NPCEntity extends Entity {
     if (distToPlayer > 15 && player.alive) {
       this.state = 'follow_close';
       return;
+    }
+
+    // If player is in enemy territory or center, join the attack
+    if (player.alive) {
+      const homeIsland = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
+      const playerDistFromHome = Math.sqrt(
+        (player.position.x - homeIsland.x) ** 2 + (player.position.z - homeIsland.z) ** 2
+      );
+      if (playerDistFromHome > 20 && this.blockCount >= 8) {
+        // Player is far from home — follow aggressively and attack enemies along the way
+        this.state = 'follow_close';
+        return;
+      }
     }
 
     // If player is nearby (< 15), do autonomous actions
@@ -568,8 +595,11 @@ export class NPCEntity extends Entity {
     const spawnerPos = this.team === TEAM_RED ? this.world.redSpawnerPos : this.world.blueSpawnerPos;
     if (!spawnerPos) { this._idle(dt); return; }
     const spawnerVec = new THREE.Vector3(spawnerPos.x, spawnerPos.y, spawnerPos.z);
-    const dist = this.position.distanceTo(spawnerVec);
-    if (dist > 3) {
+    const dist2D = Math.sqrt(
+      (this.position.x - spawnerVec.x) ** 2 +
+      (this.position.z - spawnerVec.z) ** 2
+    );
+    if (dist2D > 2) {
       this._moveToward(spawnerVec, dt);
     } else {
       this.velocity.x *= 0.3;
@@ -593,14 +623,14 @@ export class NPCEntity extends Entity {
   _attackTarget(dt) {
     if (!this.target || !this.target.alive) {
       this.target = null;
-      this.state = 'follow';
+      this.state = 'idle';
       return;
     }
 
     const dist = this.distanceTo(this.target);
     if (dist > AI_SIGHT_RANGE) {
       this.target = null;
-      this.state = 'follow';
+      this.state = 'idle';
       return;
     }
 
@@ -621,18 +651,22 @@ export class NPCEntity extends Entity {
 
   _defendBed(dt) {
     const bedPos = this.team === TEAM_RED ? this.world.redBedPos : this.world.blueBedPos;
-    if (!bedPos) { this.state = 'follow'; return; }
+    if (!bedPos) { this.state = 'idle'; return; }
 
-    const dist = this.position.distanceTo(new THREE.Vector3(bedPos.x, bedPos.y, bedPos.z));
+    // Patrol OUTSIDE the wool defense ring (radius ~5 from bed center)
+    const spawn = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
+    const patrolCenter = new THREE.Vector3(bedPos.x, spawn.y, bedPos.z);
+    const dist = this.position.distanceTo(patrolCenter);
 
-    // Patrol around bed
-    if (dist > 6) {
-      this._moveToward(new THREE.Vector3(bedPos.x, bedPos.y, bedPos.z), dt);
+    if (dist > 10) {
+      // Too far, move back toward the island
+      this._moveToward(new THREE.Vector3(spawn.x, spawn.y, spawn.z), dt);
     } else {
-      // Patrol
+      // Patrol in a circle OUTSIDE the wool defense (radius 5-6 blocks from bed)
       const time = performance.now() * 0.001;
-      const patrolX = bedPos.x + Math.sin(time + this.name.charCodeAt(0)) * 4;
-      const patrolZ = bedPos.z + Math.cos(time + this.name.charCodeAt(0)) * 4;
+      const angle = time * 0.5 + this.name.charCodeAt(this.name.length - 1) * 2;
+      const patrolX = bedPos.x + Math.sin(angle) * 6;
+      const patrolZ = bedPos.z + Math.cos(angle) * 6;
       this._moveToward(new THREE.Vector3(patrolX, this.position.y, patrolZ), dt);
     }
 
@@ -645,9 +679,9 @@ export class NPCEntity extends Entity {
   }
 
   _attackEnemyBase(dt) {
-    // Move toward enemy base
+    // Move toward enemy base using pre-built bridges
     const enemyBed = this.team === TEAM_RED ? this.world.blueBedPos : this.world.redBedPos;
-    if (!enemyBed) { this.state = 'follow'; return; }
+    if (!enemyBed) { this.state = 'idle'; return; }
 
     const enemyBedVec = new THREE.Vector3(enemyBed.x, enemyBed.y, enemyBed.z);
     const dist = this.position.distanceTo(enemyBedVec);
@@ -660,26 +694,24 @@ export class NPCEntity extends Entity {
       return;
     }
 
-    if (dist > 3) {
-      this._moveToward(enemyBedVec, dt);
+    // Pick a bridge path if we haven't yet, or if we're near base
+    if (!this._bridgeZ && this.world.bridgeZPositions) {
+      const bridges = this.world.bridgeZPositions;
+      this._bridgeZ = bridges[Math.floor(Math.random() * bridges.length)];
+    }
 
-      // Auto-bridge when over void
-      const belowY = Math.floor(this.position.y) - 1;
-      const belowBlock = this.world.getBlock(
-        Math.floor(this.position.x),
-        belowY,
-        Math.floor(this.position.z)
-      );
-      if (belowBlock === BLOCK.AIR && this.blockCount > 0) {
-        const bx = Math.floor(this.position.x);
-        const bz = Math.floor(this.position.z);
-        const woolType = this.team === TEAM_RED ? BLOCK.WOOL_RED : BLOCK.WOOL_BLUE;
-        // Place 3-wide bridge for safety
-        this.world.setBlock(bx, belowY, bz, woolType);
-        this.blockCount--;
-        if (this.blockCount > 0) { this.world.setBlock(bx, belowY, bz - 1, woolType); this.blockCount--; }
-        if (this.blockCount > 0) { this.world.setBlock(bx, belowY, bz + 1, woolType); this.blockCount--; }
+    if (dist > 3) {
+      // Navigate via bridge: first move to the bridge Z, then along X toward enemy
+      const onBridge = this._bridgeZ && Math.abs(this.position.z - this._bridgeZ) < 2;
+      let target;
+      if (onBridge || Math.abs(this.position.x - enemyBed.x) < 20) {
+        // On bridge or near enemy island: head straight for bed
+        target = enemyBedVec;
+      } else {
+        // Move to bridge entry first
+        target = new THREE.Vector3(this.position.x, this.position.y, this._bridgeZ);
       }
+      this._moveToward(target, dt);
     } else {
       // Attack the bed
       const bedBlock = this.team === TEAM_RED ? BLOCK.BED_BLUE : BLOCK.BED_RED;
@@ -709,31 +741,48 @@ export class NPCEntity extends Entity {
     this.velocity.z = dir.z * speed;
     this._faceTarget(target);
 
-    // Jump over obstacles
-    const lookX = Math.floor(this.position.x + dir.x);
-    const lookZ = Math.floor(this.position.z + dir.z);
+    // Jump over obstacles — check 1-2 blocks ahead in movement direction
     const lookY = Math.floor(this.position.y);
+    let shouldJump = false;
 
-    if (this.world.isSolid(lookX, lookY, lookZ) || this.world.isSolid(lookX, lookY + 1, lookZ)) {
-      if (this.onGround && this.jumpTimer <= 0) {
-        this.velocity.y = 8;
-        this.onGround = false;
-        this.jumpTimer = 0.5;
+    for (let ahead = 1; ahead <= 2; ahead++) {
+      const lx = Math.floor(this.position.x + dir.x * ahead);
+      const lz = Math.floor(this.position.z + dir.z * ahead);
+      if (this.world.isSolid(lx, lookY, lz) || this.world.isSolid(lx, lookY + 1, lz)) {
+        shouldJump = true;
+        break;
       }
+    }
+    // Also check diagonal (for corner collisions)
+    if (!shouldJump && Math.abs(dir.x) > 0.1 && Math.abs(dir.z) > 0.1) {
+      const dx = Math.floor(this.position.x + dir.x);
+      const dz = Math.floor(this.position.z + dir.z);
+      if (this.world.isSolid(dx, lookY, dz)) shouldJump = true;
+    }
+
+    if (shouldJump && this.onGround && this.jumpTimer <= 0) {
+      this.velocity.y = 8;
+      this.onGround = false;
+      this.jumpTimer = 0.3;
     }
 
     // === PROACTIVE BRIDGING ===
-    // Look 1-2 blocks ahead: if there's void, place bridge blocks BEFORE stepping off
+    // Only bridge when heading over actual void (no ground within a few blocks below)
     if (this.blockCount > 0) {
       const woolType = this.team === TEAM_RED ? BLOCK.WOOL_RED : BLOCK.WOOL_BLUE;
       const footY = Math.floor(this.position.y) - 1;
 
-      // Check 1 block ahead at foot level
+      // Check 1-2 blocks ahead: only bridge if there's no solid block beneath
       for (let ahead = 1; ahead <= 2; ahead++) {
         const ax = Math.floor(this.position.x + dir.x * ahead);
         const az = Math.floor(this.position.z + dir.z * ahead);
-        if (!this.world.isSolid(ax, footY, az) && footY > 0) {
-          // Place 3-wide bridge
+        // Check if there's any ground within 3 blocks below footY
+        let hasGround = false;
+        for (let dy = 0; dy >= -3; dy--) {
+          if (this.world.isSolid(ax, footY + dy, az)) { hasGround = true; break; }
+        }
+        if (!hasGround && footY > 0) {
+          // True void ahead - place bridge
           this.world.setBlock(ax, footY, az, woolType); this.blockCount--;
           if (this.blockCount <= 0) break;
           // Widen perpendicular to movement
@@ -748,12 +797,16 @@ export class NPCEntity extends Entity {
         if (this.blockCount <= 0) break;
       }
 
-      // Also place below feet if currently over void (emergency catch)
+      // Also place below feet if currently falling over void (emergency catch)
       if (!this.onGround && this.velocity.y < 0) {
         const bx = Math.floor(this.position.x);
         const by = Math.floor(this.position.y) - 1;
         const bz = Math.floor(this.position.z);
-        if (!this.world.isSolid(bx, by, bz) && by > 0 && this.blockCount > 0) {
+        let hasGroundBelow = false;
+        for (let dy = 0; dy >= -3; dy--) {
+          if (this.world.isSolid(bx, by + dy, bz)) { hasGroundBelow = true; break; }
+        }
+        if (!hasGroundBelow && by > 0 && this.blockCount > 0) {
           this.world.setBlock(bx, by, bz, woolType); this.blockCount--;
         }
       }
@@ -810,7 +863,12 @@ export class NPCEntity extends Entity {
     this.invincibleTimer = 2;
 
     const spawn = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
-    this.position.set(spawn.x + (Math.random() - 0.5) * 3, spawn.y, spawn.z + (Math.random() - 0.5) * 3);
+    // Spawn near the spawn point but only in the safe zone (away from bed wool defense)
+    this.position.set(
+      spawn.x + (Math.random() - 0.5) * 4,
+      spawn.y,
+      spawn.z + Math.random() * 2
+    );
     this.velocity.set(0, 0, 0);
   }
 }
@@ -821,17 +879,17 @@ export class EnemyAI extends NPCEntity {
     super(game, position, team, name);
     this.phase = 'early'; // early, mid, late
     this.phaseTimer = 0;
-    this.buyTimer = 5 + Math.random() * 5;
+    this.buyTimer = 3 + Math.random() * 3;
     this.attackDecisionTimer = 0;
   }
 
   _think() {
     const gameTime = this.game.gameTime;
 
-    // Phase transitions
-    if (gameTime < 120) {
+    // Phase transitions — faster escalation
+    if (gameTime < 60) {
       this.phase = 'early';
-    } else if (gameTime < 300) {
+    } else if (gameTime < 180) {
       this.phase = 'mid';
     } else {
       this.phase = 'late';
@@ -839,26 +897,32 @@ export class EnemyAI extends NPCEntity {
 
     // Find nearby enemies (= player and their teammates)
     const nearestEnemy = this._findNearestEnemy();
-    if (nearestEnemy && this.distanceTo(nearestEnemy) < 8) {
+    if (nearestEnemy && this.distanceTo(nearestEnemy) < AI_SIGHT_RANGE) {
       this.state = 'attack';
       this.target = nearestEnemy;
       return;
     }
 
-    // Phase-based behavior
+    // Phase-based behavior — more aggressive
     switch (this.phase) {
       case 'early':
-        this.state = 'gather';
-        break;
-      case 'mid':
-        // Some go to center island
-        if (Math.random() < 0.3 && this.name.includes('1')) {
-          this.state = 'attack_base'; // go toward center
+        // One enemy starts attacking early if they have a weapon and blocks
+        if (this.hasWeapon && this.blockCount >= 16 && this.name.includes('1')) {
+          this.state = 'attack_base';
         } else {
           this.state = 'gather';
         }
         break;
+      case 'mid':
+        // Half go attack, half gather
+        if (this.name.includes('1') || this.name.includes('2')) {
+          this.state = 'attack_base';
+        } else {
+          this.state = this.blockCount >= 16 ? 'attack_base' : 'gather';
+        }
+        break;
       case 'late':
+        // All-out attack
         this.state = 'attack_base';
         break;
     }
@@ -870,41 +934,28 @@ export class EnemyAI extends NPCEntity {
     if (!spawnerPos) return;
 
     const spawnerVec = new THREE.Vector3(spawnerPos.x, spawnerPos.y, spawnerPos.z);
-    const dist = this.position.distanceTo(spawnerVec);
+    const dist2D = Math.sqrt(
+      (this.position.x - spawnerVec.x) ** 2 +
+      (this.position.z - spawnerVec.z) ** 2
+    );
 
-    if (dist > 4) {
+    if (dist2D > 2) {
+      // Move toward spawner (ignore Y difference to avoid getting confused by elevation)
       this._moveToward(spawnerVec, dt);
     } else {
-      // Wander near spawner
-      this.velocity.x *= 0.3;
-      this.velocity.z *= 0.3;
+      // Close enough - wander around the spawner to pick up drops
+      if (!this.wanderTarget || this.position.distanceTo(this.wanderTarget) < 1 || Math.random() < 0.02) {
+        this.wanderTarget = new THREE.Vector3(
+          spawnerVec.x + (Math.random() - 0.5) * 4,
+          this.position.y,
+          spawnerVec.z + (Math.random() - 0.5) * 4
+        );
+      }
+      this._moveToward(this.wanderTarget, dt, 0.5);
     }
-
-    // Auto-buy logic
-    this.buyTimer -= dt;
-    if (this.buyTimer <= 0) {
-      this.buyTimer = 8 + Math.random() * 5;
-      this._autoBuy();
-    }
+    // Note: buyTimer is already decremented in parent NPCEntity.update()
   }
 
-  _autoBuy() {
-    // Simple buying logic
-    if (!this.hasWeapon && this.currency.copper >= 8) {
-      this.hasWeapon = true;
-      this.damage = 5;
-      this.currency.copper -= 8;
-    }
-    if (!this.hasArmor && this.currency.copper >= 6) {
-      this.hasArmor = true;
-      this.armor = 2;
-      this.currency.copper -= 6;
-    }
-    if (this.blockCount < 16 && this.currency.copper >= 2) {
-      this.blockCount += 16;
-      this.currency.copper -= 2;
-    }
-  }
 }
 
 // ==================== ZOMBIE ====================
@@ -1002,12 +1053,19 @@ export class ZombieEntity extends Entity {
     this.velocity.x = dir.x * speed;
     this.velocity.z = dir.z * speed;
 
-    // Jump
-    const lookX = Math.floor(this.position.x + dir.x);
-    const lookZ = Math.floor(this.position.z + dir.z);
+    // Jump over obstacles — check 1-2 blocks ahead
     const lookY = Math.floor(this.position.y);
-    if (this.world.isSolid(lookX, lookY, lookZ) && this.onGround) {
-      this.velocity.y = 6;
+    let blocked = false;
+    for (let ahead = 1; ahead <= 2; ahead++) {
+      const lx = Math.floor(this.position.x + dir.x * ahead);
+      const lz = Math.floor(this.position.z + dir.z * ahead);
+      if (this.world.isSolid(lx, lookY, lz) || this.world.isSolid(lx, lookY + 1, lz)) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked && this.onGround) {
+      this.velocity.y = 7;
       this.onGround = false;
     }
   }

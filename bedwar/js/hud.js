@@ -90,11 +90,15 @@ export class HUD {
     this.elements.timer.textContent = `${min}:${sec}`;
 
     // Death screen
-    if (!player.alive && !player.eliminated) {
+    if (!player.alive && this.game.phase !== 'over') {
       this.elements.deathScreen.style.display = 'flex';
-      this.elements.respawnTimer.textContent = Math.ceil(player.respawnTimer);
-      const bedAlive = player.team === TEAM_RED ? this.game.world.redBedAlive : this.game.world.blueBedAlive;
-      this.elements.deathMsg.textContent = bedAlive ? '复活中...' : '你已被永久淘汰!';
+      if (player.eliminated) {
+        this.elements.respawnTimer.textContent = '☠';
+        this.elements.deathMsg.textContent = '你已被永久淘汰! 等待队友...';
+      } else {
+        this.elements.respawnTimer.textContent = Math.ceil(player.respawnTimer);
+        this.elements.deathMsg.textContent = '复活中...';
+      }
     } else {
       this.elements.deathScreen.style.display = 'none';
     }
@@ -219,6 +223,11 @@ export class HUD {
 
     this.elements.shopClose.onclick = () => this.closeShop();
 
+    // Click outside panel to close
+    this.elements.shopOverlay.addEventListener('click', (e) => {
+      if (e.target === this.elements.shopOverlay) this.closeShop();
+    });
+
     // Build tabs
     this._buildShopTabs();
     this._buildShopItems();
@@ -321,6 +330,7 @@ export class HUD {
 
   closeShop() {
     this.elements.shopOverlay.classList.remove('active');
+    this._reacquirePointerLock();
   }
 
   isShopOpen() {
@@ -338,6 +348,11 @@ export class HUD {
     });
 
     document.getElementById('cmd-cancel').onclick = () => this.closeCommandMenu();
+
+    // Click outside panel to close
+    this.elements.commandMenu.addEventListener('click', (e) => {
+      if (e.target === this.elements.commandMenu) this.closeCommandMenu();
+    });
   }
 
   openCommandMenu() {
@@ -347,6 +362,7 @@ export class HUD {
 
   closeCommandMenu() {
     this.elements.commandMenu.classList.remove('active');
+    this._reacquirePointerLock();
   }
 
   isCommandMenuOpen() {
@@ -356,6 +372,11 @@ export class HUD {
   // ==================== INVENTORY ====================
   _initInventoryUI() {
     this.elements.invClose.onclick = () => this.closeInventory();
+
+    // Click outside panel to close
+    this.elements.inventoryOverlay.addEventListener('click', (e) => {
+      if (e.target === this.elements.inventoryOverlay) this.closeInventory();
+    });
   }
 
   openInventory() {
@@ -366,6 +387,7 @@ export class HUD {
 
   closeInventory() {
     this.elements.inventoryOverlay.classList.remove('active');
+    this._reacquirePointerLock();
   }
 
   isInventoryOpen() {
@@ -403,6 +425,11 @@ export class HUD {
   // ==================== CRAFTING ====================
   _initCraftingUI() {
     this.elements.craftClose.onclick = () => this.closeCrafting();
+
+    // Click outside panel to close
+    this.elements.craftingOverlay.addEventListener('click', (e) => {
+      if (e.target === this.elements.craftingOverlay) this.closeCrafting();
+    });
   }
 
   openCrafting() {
@@ -413,6 +440,7 @@ export class HUD {
 
   closeCrafting() {
     this.elements.craftingOverlay.classList.remove('active');
+    this._reacquirePointerLock();
   }
 
   isCraftingOpen() {
@@ -477,6 +505,33 @@ export class HUD {
     player.addItem(recipe.result, recipe.qty || 1);
     this.showNotification(`合成了 ${recipe.result.name}`);
     this._buildCraftingList();
+  }
+
+  // ==================== POINTER LOCK ====================
+  _reacquirePointerLock() {
+    if (!this.game.running || this.game.phase === 'over') return;
+
+    // Try to re-acquire pointer lock directly.
+    // This works when called from a user gesture (ESC key, button click).
+    // Suppress the pointerlockchange "lost" handler briefly.
+    this.game.player._closingUI = true;
+    try {
+      this.game.player.requestPointerLock();
+    } catch(e) {}
+
+    // If pointer lock request fails (e.g. browser denied it),
+    // show "click to resume" as fallback after a short delay.
+    setTimeout(() => {
+      this.game.player._closingUI = false;
+      if (!this.game.player.pointerLocked && this.game.running && this.game.phase !== 'over' && !this.game.isAnyUIOpen()) {
+        const cts = document.getElementById('click-to-start');
+        if (cts) {
+          cts.style.display = 'flex';
+          cts.querySelector('div:first-child').textContent = '点击屏幕继续';
+          cts.querySelector('.hint').textContent = '按 ESC 可暂停并释放鼠标';
+        }
+      }
+    }, 200);
   }
 
   // ==================== GAME OVER ====================

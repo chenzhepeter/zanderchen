@@ -127,16 +127,17 @@ export class Game {
     this.player.addItem(ITEMS.WOOD_SWORD, 1);
 
     // Create red team NPCs (3 teammates)
+    // Spawn outside wool defense (wool is at cz-1..cz+1, spawn.z = cz+3)
     const redNames = ['队友1', '队友2', '队友3'];
     for (let i = 0; i < 3; i++) {
       const pos = new THREE.Vector3(
         spawn.x + (i - 1) * 2,
         spawn.y,
-        spawn.z - 2
+        spawn.z
       );
       const npc = new NPCEntity(this, pos, TEAM_RED, redNames[i]);
       npc.command = 'follow';
-      npc.blockCount = 32; // start with bridge blocks
+      npc.blockCount = 64; // start with bridge blocks
       this.redTeamNPCs.push(npc);
     }
 
@@ -147,10 +148,10 @@ export class Game {
       const pos = new THREE.Vector3(
         blueSpawn.x + (i - 1.5) * 2,
         blueSpawn.y,
-        blueSpawn.z - 2
+        blueSpawn.z
       );
       const enemy = new EnemyAI(this, pos, TEAM_BLUE, blueNames[i]);
-      enemy.blockCount = 32;
+      enemy.blockCount = 64;
       this.blueTeamNPCs.push(enemy);
     }
 
@@ -403,9 +404,9 @@ export class Game {
       }
     }
 
-    // Center island resources
+    // Center island resources (currency)
     this.centerResourceTimer += dt;
-    if (this.centerResourceTimer >= 15) {
+    if (this.centerResourceTimer >= 8) {
       this.centerResourceTimer = 0;
       for (const rp of this.world.centerResourcePositions) {
         if (this.currencyDrops.filter(d =>
@@ -415,6 +416,35 @@ export class Game {
             new THREE.Vector3(rp.x + (Math.random() - 0.5), rp.y + 0.5, rp.z + (Math.random() - 0.5)),
             [{ type: rp.type, amount: 1 }]
           );
+        }
+      }
+    }
+
+    // Center island item spawns (bow, arrows, food)
+    if (!this._centerItemTimer) this._centerItemTimer = 0;
+    this._centerItemTimer += dt;
+    if (this._centerItemTimer >= 20) {
+      this._centerItemTimer = 0;
+      const itemMap = {
+        bow: { def: ITEMS.BOW, qty: 1 },
+        arrow: { def: ITEMS.ARROW, qty: 4 },
+        bread: { def: ITEMS.BREAD, qty: 2 },
+        chicken: { def: ITEMS.CHICKEN, qty: 1 },
+      };
+      for (const ip of this.world.centerItemPositions) {
+        // Don't spawn if there's already a dropped item nearby
+        const nearby = this.droppedItems.filter(d =>
+          d.position.distanceTo(new THREE.Vector3(ip.x, ip.y, ip.z)) < 4
+        ).length;
+        if (nearby < 1) {
+          const info = itemMap[ip.item];
+          if (info) {
+            this.spawnDroppedItems(
+              new THREE.Vector3(ip.x, ip.y, ip.z),
+              [{ item: info.def, count: info.qty }],
+              { copper: 0, iron: 0, diamond: 0, gold: 0 }
+            );
+          }
         }
       }
     }
@@ -660,9 +690,9 @@ export class Game {
   }
 
   handleFKey() {
-    // If any UI is open, close it first
+    // F toggles: if any UI is open, close it
     if (this.isAnyUIOpen()) {
-      this.handleEscape();
+      this.closeAnyUI();
       return;
     }
 
@@ -693,15 +723,14 @@ export class Game {
   }
 
   handleEscape() {
-    if (this.hud.isShopOpen()) {
-      this.hud.closeShop();
-    } else if (this.hud.isCommandMenuOpen()) {
-      this.hud.closeCommandMenu();
-    } else if (this.hud.isInventoryOpen()) {
-      this.hud.closeInventory();
-    } else if (this.hud.isCraftingOpen()) {
-      this.hud.closeCrafting();
-    }
+    // ESC does not close any UI. Each UI has its own key (F or E) or click-outside to close.
+  }
+
+  closeAnyUI() {
+    if (this.hud.isShopOpen()) this.hud.closeShop();
+    else if (this.hud.isCommandMenuOpen()) this.hud.closeCommandMenu();
+    else if (this.hud.isInventoryOpen()) this.hud.closeInventory();
+    else if (this.hud.isCraftingOpen()) this.hud.closeCrafting();
   }
 
   toggleInventory() {

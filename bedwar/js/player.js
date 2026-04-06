@@ -26,6 +26,7 @@ export class Player {
     this.armor = 0;
     this.team = TEAM_RED;
     this.alive = true;
+    this.eliminated = false;
     this.respawnTimer = 0;
     this.invincibleTimer = 0;
 
@@ -52,6 +53,7 @@ export class Player {
     this.mouseDelta = { x: 0, y: 0 };
     this.pointerLocked = false;
     this.canvasActive = false; // whether canvas has focus for actions
+    this._closingUI = false;  // flag to suppress pause overlay when closing UI
 
     // Mouse drag tracking (fallback when pointer lock unavailable)
     this._lastMouseX = 0;
@@ -136,8 +138,8 @@ export class Player {
     document.addEventListener('mousedown', (e) => {
       if (!this.game.running || this.game.isAnyUIOpen()) return;
 
-      // Try pointer lock on first click if not locked
-      if (!this.pointerLocked && !this.canvasActive) {
+      // Re-acquire pointer lock whenever it's lost and user clicks the canvas
+      if (!this.pointerLocked && e.target === canvas) {
         try { canvas.requestPointerLock(); } catch(err) {}
         this.canvasActive = true;
       }
@@ -173,7 +175,22 @@ export class Player {
 
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === canvas;
-      if (this.pointerLocked) this.canvasActive = true;
+      if (this.pointerLocked) {
+        this.canvasActive = true;
+        // Hide click-to-start if it was shown as a resume prompt
+        const cts = document.getElementById('click-to-start');
+        if (cts) cts.style.display = 'none';
+      } else if (this.game.running && this.game.phase !== 'over'
+                 && !this.game.isAnyUIOpen() && !this._closingUI) {
+        // Pointer lock was lost during gameplay (e.g. user pressed ESC with no UI open)
+        // Show a "click to resume" prompt
+        const cts = document.getElementById('click-to-start');
+        if (cts) {
+          cts.style.display = 'flex';
+          cts.querySelector('div:first-child').textContent = '点击屏幕继续';
+          cts.querySelector('.hint').textContent = '按 ESC 可暂停并释放鼠标';
+        }
+      }
     });
 
     // Track when user clicks away from canvas
@@ -298,6 +315,7 @@ export class Player {
     } else if (this.team !== TEAM_RED && this.world.blueBedAlive) {
       this.respawnTimer = 5;
     } else {
+      this.eliminated = true;
       this.game.onPlayerEliminated(this);
     }
   }
@@ -411,8 +429,9 @@ export class Player {
       if (this.velocity.y < 0) {
         this.position.y = Math.floor(this.position.y) + 1.001;
         this.onGround = true;
+      } else {
+        this.position.y -= this.velocity.y * dt;
       }
-      this.position.y -= this.velocity.y * dt;
       this.velocity.y = 0;
     } else {
       this.onGround = false;

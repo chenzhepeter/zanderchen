@@ -18,7 +18,9 @@ document.getElementById('btn-start').addEventListener('click', () => {
   clickToStart.addEventListener('click', () => {
     clickToStart.style.display = 'none';
     game.player.requestPointerLock();
-    game.start();
+    if (!game.running) {
+      game.start();
+    }
   });
 });
 

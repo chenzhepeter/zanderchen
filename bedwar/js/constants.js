@@ -121,7 +121,7 @@ export const ITEMS = {
 
   // Crafting materials
   STICK: { id: 'stick', name: '木棍', icon: '/', type: 'material', stackable: true, maxStack: 64 },
-  STONE_MAT: { id: 'stone_mat', name: '石头', icon: '�ite', type: 'material', stackable: true, maxStack: 64 },
+  STONE_MAT: { id: 'stone_mat', name: '石头', icon: '🪨', type: 'material', stackable: true, maxStack: 64 },
   WOOD_SHIELD: { id: 'wood_shield', name: '木盾', icon: '🛡️', type: 'shield', blockChance: 0.5 },
   LADDER: { id: 'ladder', name: '梯子', icon: '🪜', type: 'block', blockType: BLOCK.WOOD_PLANK, stackable: true, maxStack: 16 },
   CAMPFIRE: { id: 'campfire', name: '篝火', icon: '🔥', type: 'placeable', stackable: true, maxStack: 4 },
@@ -144,8 +144,8 @@ export const SHOP_CATEGORIES = {
       { item: ITEMS.STONE_SWORD, price: { copper: 8 }, desc: '攻击力 5' },
       { item: ITEMS.IRON_SWORD, price: { iron: 4 }, desc: '攻击力 7' },
       { item: ITEMS.DIAMOND_SWORD, price: { diamond: 4 }, desc: '攻击力 10' },
-      { item: ITEMS.BOW, price: { iron: 6 }, desc: '远程武器' },
-      { item: ITEMS.ARROW, price: { iron: 2 }, desc: '×8 弓的弹药', qty: 8 },
+      { item: ITEMS.BOW, price: { copper: 6 }, desc: '远程武器' },
+      { item: ITEMS.ARROW, price: { copper: 2 }, desc: '×8 弓的弹药', qty: 8 },
       { item: ITEMS.SLINGSHOT, price: { copper: 2 }, desc: '低伤害，可击退' },
     ]
   },
@@ -204,8 +204,8 @@ export const PLAYER_WIDTH = 0.6;
 export const PLAYER_EYE_HEIGHT = 1.5;
 
 // Game timing
-export const RESOURCE_COPPER_INTERVAL = 3; // seconds
-export const RESOURCE_IRON_INTERVAL = 10;
+export const RESOURCE_COPPER_INTERVAL = 1.5; // seconds
+export const RESOURCE_IRON_INTERVAL = 5;
 export const RESPAWN_TIME = 5;
 export const PREP_PHASE_TIME = 30;
 export const MAX_GAME_TIME = 15 * 60; // 15 minutes

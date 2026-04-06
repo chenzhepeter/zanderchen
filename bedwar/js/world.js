@@ -98,6 +98,7 @@ export class VoxelWorld {
     this._generateIsland(RED_ISLAND.cx, RED_ISLAND.cy, RED_ISLAND.cz, RED_ISLAND.size, 'red');
     this._generateIsland(BLUE_ISLAND.cx, BLUE_ISLAND.cy, BLUE_ISLAND.cz, BLUE_ISLAND.size, 'blue');
     this._generateCenterIsland();
+    this._generateBridges();
     // Mark all chunks dirty for initial build
     for (let cx = 0; cx < this.chunksX; cx++)
       for (let cy = 0; cy < this.chunksY; cy++)
@@ -144,7 +145,7 @@ export class VoxelWorld {
     if (team === 'red') this.redCraftPos = { x: craftPos.x, y: cy + 1, z: craftPos.z };
     else this.blueCraftPos = { x: craftPos.x, y: cy + 1, z: craftPos.z };
 
-    const spawnPos = { x: cx, y: cy + 2.5, z: cz + 3 };
+    const spawnPos = { x: cx, y: cy + 1.01, z: cz + 3 };
     if (team === 'red') this.redSpawnPos = spawnPos; else this.blueSpawnPos = spawnPos;
 
     this._generateTree(cx + size - 2, cy + 1, cz + size - 2);
@@ -186,6 +187,20 @@ export class VoxelWorld {
       { x: cx, y: cy + 1, z: cz - 4, type: 'gold' },
       { x: cx, y: cy + 1, z: cz + 4, type: 'gold' },
     ];
+
+    // Item pickup positions (arrows, food scattered around the island — no bows)
+    this.centerItemPositions = [
+      { x: cx - 3, y: cy + 1, z: cz - 6, item: 'arrow' },
+      { x: cx + 3, y: cy + 1, z: cz + 6, item: 'arrow' },
+      { x: cx - 7, y: cy + 1, z: cz - 2, item: 'arrow' },
+      { x: cx + 7, y: cy + 1, z: cz + 2, item: 'arrow' },
+      { x: cx - 6, y: cy + 1, z: cz + 3, item: 'arrow' },
+      { x: cx + 6, y: cy + 1, z: cz - 3, item: 'arrow' },
+      { x: cx, y: cy + 1, z: cz + 7, item: 'bread' },
+      { x: cx, y: cy + 1, z: cz - 7, item: 'bread' },
+      { x: cx + 5, y: cy + 1, z: cz + 5, item: 'chicken' },
+      { x: cx - 5, y: cy + 1, z: cz - 5, item: 'chicken' },
+    ];
     this.blocks[this.index(cx - 4, cy, cz)] = BLOCK.DIAMOND_BLOCK;
     this.blocks[this.index(cx + 4, cy, cz)] = BLOCK.DIAMOND_BLOCK;
     this.blocks[this.index(cx, cy, cz - 4)] = BLOCK.GOLD_BLOCK;
@@ -209,7 +224,95 @@ export class VoxelWorld {
     ];
   }
 
-  // ==================== BRIDGES / TNT ====================
+  // ==================== PRE-BUILT BRIDGES ====================
+  _generateBridges() {
+    // Three bridges connect each side island to the center island
+    // Bridge Z positions
+    const bridgeZs = [30, 25, 20]; // north, center, south
+    const types = ['gaps', 'walls', 'corridor']; // obstacle types
+
+    // Red side bridges: from red island edge (x≈23) to center island edge (x≈46)
+    // Blue side bridges: from center island edge (x≈74) to blue island edge (x≈97)
+    for (let i = 0; i < 3; i++) {
+      this._generateBridge(23, 46, bridgeZs[i], types[i], 'left');   // red → center
+      this._generateBridge(74, 97, bridgeZs[i], types[i], 'right');  // center → blue
+    }
+
+    // Store bridge Z coords for NPC pathfinding
+    this.bridgeZPositions = bridgeZs;
+  }
+
+  _generateBridge(startX, endX, z, type, side) {
+    // Height: side islands at y=15, center island at y=13
+    // Transition smoothly across the bridge
+    const length = endX - startX;
+    const isLeftSide = side === 'left'; // red→center goes high→low, center→blue goes low→high
+
+    for (let i = 0; i <= length; i++) {
+      const x = startX + i;
+      const progress = i / length; // 0 at start, 1 at end
+
+      // Height transition: smooth step from island height to center height
+      let y;
+      if (isLeftSide) {
+        // y=15 → y=13: descending toward center
+        y = Math.round(15 - progress * 2);
+      } else {
+        // y=13 → y=15: ascending toward blue island
+        y = Math.round(13 + progress * 2);
+      }
+
+      // Apply obstacle patterns
+      let placeBridge = true;
+
+      if (type === 'gaps') {
+        // Gap bridge: 1-block gaps every 5 blocks (skip first and last 3 blocks for safe entry/exit)
+        if (i > 3 && i < length - 3 && i % 5 === 3) {
+          placeBridge = false; // gap
+        }
+      }
+
+      if (placeBridge) {
+        this.blocks[this.index(x, y, z)] = BLOCK.COBBLESTONE;
+        // Support pillar underneath to make it look sturdy
+        if (y > 10) {
+          this.blocks[this.index(x, y - 1, z)] = BLOCK.STONE;
+        }
+      }
+
+      // Obstacle decorations
+      if (type === 'walls' && placeBridge) {
+        // Wall bridge: 1-high stone walls every 6 blocks
+        if (i > 2 && i < length - 2 && i % 6 === 3) {
+          this.blocks[this.index(x, y + 1, z)] = BLOCK.COBBLESTONE;
+        }
+      }
+
+      if (type === 'corridor' && placeBridge) {
+        // Corridor bridge: walls on both sides in segments
+        if (i > 4 && i < length - 4) {
+          const segment = Math.floor(i / 8);
+          if (segment % 2 === 0 && i % 8 < 5) {
+            // Side walls creating narrow corridor
+            this.blocks[this.index(x, y + 1, z - 1)] = BLOCK.COBBLESTONE;
+            this.blocks[this.index(x, y + 1, z + 1)] = BLOCK.COBBLESTONE;
+          }
+        }
+        // Place TNT traps at a few strategic spots
+        if (i === Math.floor(length * 0.3) || i === Math.floor(length * 0.7)) {
+          this.blocks[this.index(x, y + 1, z)] = BLOCK.TNT;
+        }
+      }
+    }
+
+    // Add railings/markers at bridge entry points
+    this.blocks[this.index(startX, Math.round(isLeftSide ? 15 : 13) + 1, z - 1)] = BLOCK.WOOD_LOG;
+    this.blocks[this.index(startX, Math.round(isLeftSide ? 15 : 13) + 1, z + 1)] = BLOCK.WOOD_LOG;
+    this.blocks[this.index(endX, Math.round(isLeftSide ? 13 : 15) + 1, z - 1)] = BLOCK.WOOD_LOG;
+    this.blocks[this.index(endX, Math.round(isLeftSide ? 13 : 15) + 1, z + 1)] = BLOCK.WOOD_LOG;
+  }
+
+  // ==================== TEMP BRIDGES / TNT ====================
   placeTempBridge(x, y, z, dirX, dirZ, length = 12) {
     const placed = [];
     const perpX = Math.abs(dirZ) > 0.5 ? 1 : 0;
