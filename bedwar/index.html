@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>起床战争 - Bed Wars</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; font-family: 'Microsoft YaHei', Arial, sans-serif; cursor: none; }
+#game-canvas { display: block; width: 100vw; height: 100vh; }
+
+/* Main Menu */
+#main-menu {
+  position: fixed; inset: 0; z-index: 1000;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: #fff;
+}
+#main-menu h1 { font-size: 72px; margin-bottom: 10px; text-shadow: 0 0 20px rgba(255,100,100,0.5), 0 0 40px rgba(100,100,255,0.3); }
+#main-menu .subtitle { font-size: 20px; color: #aaa; margin-bottom: 50px; }
+#main-menu button {
+  display: block; width: 280px; padding: 15px; margin: 10px;
+  font-size: 20px; font-family: inherit; border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; cursor: pointer;
+  transition: all 0.2s;
+}
+#main-menu button:hover { background: rgba(255,255,255,0.25); border-color: #fff; transform: scale(1.05); }
+
+/* Controls Help */
+#controls-overlay {
+  position: fixed; inset: 0; z-index: 1001;
+  background: rgba(0,0,0,0.9); display: none;
+  flex-direction: column; align-items: center; justify-content: center; color: #fff;
+}
+#controls-overlay .controls-grid { display: grid; grid-template-columns: auto auto; gap: 8px 30px; font-size: 18px; margin: 30px 0; }
+#controls-overlay .key { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 4px; text-align: center; }
+#controls-overlay button { padding: 12px 40px; font-size: 18px; font-family: inherit; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; color: #fff; cursor: pointer; }
+
+/* HUD */
+#hud { position: fixed; inset: 0; z-index: 100; pointer-events: none; display: none; }
+#hud * { pointer-events: none; }
+
+/* Crosshair */
+#crosshair {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 24px; height: 24px;
+}
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute; background: rgba(255,255,255,0.8);
+}
+#crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-50%); }
+#crosshair::after { left: 50%; top: 0; height: 100%; width: 2px; transform: translateX(-50%); }
+
+/* Team panels */
+#team-panel-left, #team-panel-right {
+  position: absolute; top: 10px; padding: 10px; border-radius: 8px;
+  background: rgba(0,0,0,0.5); font-size: 13px; color: #fff; min-width: 160px;
+}
+#team-panel-left { left: 10px; border-left: 3px solid #ff4444; }
+#team-panel-right { right: 10px; border-right: 3px solid #4488ff; }
+.team-member { margin: 3px 0; display: flex; align-items: center; gap: 6px; }
+.team-member .hearts { color: #ff3333; font-size: 11px; }
+.team-member.dead { opacity: 0.5; text-decoration: line-through; }
+
+/* Timer */
+#game-timer {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.6); padding: 6px 16px; border-radius: 6px;
+  color: #fff; font-size: 18px; font-weight: bold;
+}
+
+/* HP / Hunger / Armor bars */
+#status-bars {
+  position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.bar-row { display: flex; gap: 1px; font-size: 14px; }
+.heart { color: #ff3333; }
+.heart.empty { color: #555; }
+.hunger { color: #c8a020; }
+.hunger.empty { color: #555; }
+.armor-icon { color: #aaaaff; }
+.armor-icon.empty { color: #555; }
+
+/* Hotbar */
+#hotbar {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 4px; background: rgba(0,0,0,0.6); padding: 6px; border-radius: 8px;
+}
+.hotbar-slot {
+  width: 52px; height: 52px; background: rgba(255,255,255,0.1);
+  border: 2px solid rgba(255,255,255,0.2); border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 22px; position: relative; color: #fff;
+}
+.hotbar-slot.selected { border-color: #fff; background: rgba(255,255,255,0.25); }
+.hotbar-slot .slot-count {
+  position: absolute; bottom: 2px; right: 4px; font-size: 11px; font-weight: bold;
+  text-shadow: 1px 1px 2px #000;
+}
+.hotbar-slot .slot-key {
+  position: absolute; top: 1px; left: 4px; font-size: 9px; color: rgba(255,255,255,0.5);
+}
+
+/* Currency display */
+#currency-display {
+  position: absolute; bottom: 72px; right: 20px;
+  background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 6px;
+  color: #fff; font-size: 14px; display: flex; gap: 12px;
+}
+
+/* Hand item display */
+#hand-item {
+  position: absolute; bottom: 0; right: 10%; width: 150px; height: 200px;
+  font-size: 80px; display: flex; align-items: flex-end; justify-content: center;
+  filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
+  transform: rotate(-15deg); transform-origin: bottom right;
+}
+
+/* Shop UI */
+#shop-overlay {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+}
+#shop-overlay.active { display: flex; }
+#shop-overlay * { pointer-events: auto; }
+#shop-panel {
+  background: #2a2a3a; border-radius: 12px; padding: 20px; min-width: 500px; max-width: 700px;
+  max-height: 80vh; color: #fff; box-shadow: 0 0 30px rgba(0,0,0,0.8);
+}
+#shop-panel h2 { text-align: center; margin-bottom: 15px; }
+.shop-tabs { display: flex; gap: 6px; margin-bottom: 15px; flex-wrap: wrap; }
+.shop-tab {
+  padding: 8px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.05); color: #ccc; cursor: pointer; font-size: 14px;
+}
+.shop-tab.active { background: rgba(255,255,255,0.2); color: #fff; border-color: #fff; }
+.shop-items { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.shop-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px;
+  background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; transition: all 0.15s;
+}
+.shop-item:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.3); }
+.shop-item .item-icon { font-size: 28px; width: 40px; text-align: center; }
+.shop-item .item-info { flex: 1; }
+.shop-item .item-name { font-weight: bold; }
+.shop-item .item-desc { font-size: 12px; color: #aaa; }
+.shop-item .item-price { font-size: 14px; color: #ffd700; white-space: nowrap; }
+.shop-item.cant-afford { opacity: 0.4; }
+#shop-close { display: block; margin: 15px auto 0; padding: 8px 30px; font-size: 16px; background: rgba(255,100,100,0.3); border: 1px solid rgba(255,100,100,0.5); border-radius: 6px; color: #fff; cursor: pointer; }
+
+/* Command menu */
+#command-menu {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.5);
+  display: none; align-items: center; justify-content: center;
+}
+#command-menu.active { display: flex; }
+#command-menu * { pointer-events: auto; }
+#command-panel {
+  background: #2a2a3a; border-radius: 12px; padding: 25px; min-width: 340px;
+  color: #fff; text-align: center; box-shadow: 0 0 30px rgba(0,0,0,0.8);
+}
+#command-panel h3 { margin-bottom: 18px; font-size: 20px; }
+.cmd-btn {
+  display: block; width: 100%; padding: 14px; margin: 8px 0; font-size: 16px;
+  font-family: inherit; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px; color: #fff; cursor: pointer; text-align: left; transition: all 0.15s;
+}
+.cmd-btn:hover { background: rgba(255,255,255,0.2); border-color: #fff; }
+.cmd-btn .cmd-title { font-weight: bold; }
+.cmd-btn .cmd-desc { font-size: 12px; color: #aaa; margin-top: 2px; }
+#cmd-cancel { margin-top: 12px; padding: 8px 24px; font-size: 14px; background: rgba(255,100,100,0.2); border: 1px solid rgba(255,100,100,0.4); border-radius: 6px; color: #fff; cursor: pointer; }
+
+/* Death screen */
+#death-screen {
+  position: fixed; inset: 0; z-index: 300; background: rgba(180,0,0,0.4);
+  display: none; align-items: center; justify-content: center; color: #fff;
+  flex-direction: column; font-size: 32px;
+}
+#death-screen .death-timer { font-size: 64px; font-weight: bold; margin: 20px 0; }
+#death-screen .death-msg { font-size: 18px; color: #faa; }
+
+/* Game Over */
+#gameover-screen {
+  position: fixed; inset: 0; z-index: 400; display: none;
+  align-items: center; justify-content: center; flex-direction: column; color: #fff;
+}
+#gameover-screen.win { background: rgba(0,100,0,0.6); }
+#gameover-screen.lose { background: rgba(100,0,0,0.6); }
+#gameover-screen h1 { font-size: 64px; margin-bottom: 20px; }
+#gameover-screen p { font-size: 24px; margin-bottom: 40px; }
+#gameover-screen button { padding: 15px 40px; font-size: 20px; font-family: inherit; background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.5); border-radius: 8px; color: #fff; cursor: pointer; }
+
+/* Notification */
+#notification {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -80px);
+  font-size: 24px; color: #fff; text-shadow: 0 0 10px rgba(0,0,0,0.8);
+  text-align: center; opacity: 0; transition: opacity 0.3s;
+  pointer-events: none;
+}
+#notification.show { opacity: 1; }
+
+/* Preparation phase banner */
+#phase-banner {
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.7); padding: 8px 24px; border-radius: 8px;
+  color: #ffd700; font-size: 18px; font-weight: bold; display: none;
+}
+
+/* Inventory overlay */
+#inventory-overlay {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+}
+#inventory-overlay.active { display: flex; }
+#inventory-overlay * { pointer-events: auto; }
+#inventory-panel {
+  background: #2a2a3a; border-radius: 12px; padding: 20px; min-width: 400px;
+  color: #fff; box-shadow: 0 0 30px rgba(0,0,0,0.8);
+}
+#inventory-panel h2 { text-align: center; margin-bottom: 15px; }
+.inv-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.inv-slot {
+  width: 60px; height: 60px; background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.15); border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 26px; position: relative; cursor: pointer;
+}
+.inv-slot:hover { background: rgba(255,255,255,0.18); }
+.inv-slot .inv-count { position: absolute; bottom: 2px; right: 4px; font-size: 11px; font-weight: bold; }
+.inv-slot .inv-name { position: absolute; bottom: -16px; font-size: 9px; color: #aaa; white-space: nowrap; }
+#inv-close { display: block; margin: 20px auto 0; padding: 8px 30px; font-size: 16px; background: rgba(255,100,100,0.3); border: 1px solid rgba(255,100,100,0.5); border-radius: 6px; color: #fff; cursor: pointer; }
+
+/* Crafting overlay */
+#crafting-overlay {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+}
+#crafting-overlay.active { display: flex; }
+#crafting-overlay * { pointer-events: auto; }
+#crafting-panel {
+  background: #2a2a3a; border-radius: 12px; padding: 20px; min-width: 450px;
+  color: #fff; box-shadow: 0 0 30px rgba(0,0,0,0.8);
+}
+#crafting-panel h2 { text-align: center; margin-bottom: 15px; }
+.craft-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px;
+  background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; transition: all 0.15s; margin-bottom: 6px;
+}
+.craft-item:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.3); }
+.craft-item.cant-craft { opacity: 0.4; }
+.craft-item .item-icon { font-size: 28px; width: 40px; text-align: center; }
+.craft-item .item-info { flex: 1; }
+.craft-item .item-name { font-weight: bold; }
+.craft-item .item-materials { font-size: 12px; color: #aaa; }
+#craft-close { display: block; margin: 15px auto 0; padding: 8px 30px; font-size: 16px; background: rgba(255,100,100,0.3); border: 1px solid rgba(255,100,100,0.5); border-radius: 6px; color: #fff; cursor: pointer; }
+
+/* Click to start */
+#click-to-start {
+  position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.5);
+  display: none; align-items: center; justify-content: center; color: #fff;
+  font-size: 28px; cursor: pointer; flex-direction: column;
+}
+#click-to-start .hint { font-size: 16px; color: #aaa; margin-top: 10px; }
+
+/* Bed destroyed notification */
+.bed-destroyed-alert {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 36px; font-weight: bold; color: #ff4444; z-index: 250;
+  text-shadow: 0 0 20px rgba(255,0,0,0.8); animation: bedAlert 2s forwards;
+}
+@keyframes bedAlert {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+}
+</style>
+</head>
+<body>
+
+<canvas id="game-canvas"></canvas>
+
+<!-- Main Menu -->
+<div id="main-menu">
+  <h1>🛏️ 起床战争</h1>
+  <p class="subtitle">Bed Wars - 体素对战策略游戏</p>
+  <button id="btn-start">开始游戏</button>
+  <button id="btn-controls">操作说明</button>
+</div>
+
+<!-- Controls -->
+<div id="controls-overlay">
+  <h2>操作说明</h2>
+  <div class="controls-grid">
+    <span class="key">W A S D</span><span>移动</span>
+    <span class="key">空格</span><span>跳跃</span>
+    <span class="key">左Shift</span><span>加速奔跑</span>
+    <span class="key">鼠标左键</span><span>攻击 / 破坏方块</span>
+    <span class="key">鼠标右键</span><span>使用物品 / 放置方块</span>
+    <span class="key">E</span><span>打开背包</span>
+    <span class="key">F</span><span>交互 / 队友指令</span>
+    <span class="key">滚轮 / 1~5</span><span>切换物品栏</span>
+    <span class="key">ESC</span><span>解锁鼠标</span>
+  </div>
+  <button id="btn-back">返回</button>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="team-panel-left"></div>
+  <div id="team-panel-right"></div>
+  <div id="game-timer">00:00</div>
+  <div id="status-bars">
+    <div class="bar-row" id="armor-bar"></div>
+    <div class="bar-row" id="hp-bar"></div>
+    <div class="bar-row" id="hunger-bar"></div>
+  </div>
+  <div id="hotbar"></div>
+  <div id="currency-display"></div>
+  <div id="hand-item"></div>
+  <div id="notification"></div>
+  <div id="phase-banner"></div>
+</div>
+
+<!-- Shop -->
+<div id="shop-overlay">
+  <div id="shop-panel">
+    <h2 id="shop-title">商人</h2>
+    <div class="shop-tabs" id="shop-tabs"></div>
+    <div class="shop-items" id="shop-items"></div>
+    <button id="shop-close">关闭 (ESC)</button>
+  </div>
+</div>
+
+<!-- Command Menu -->
+<div id="command-menu">
+  <div id="command-panel">
+    <h3>📋 队友指令</h3>
+    <button class="cmd-btn" data-cmd="defend">
+      <div class="cmd-title">🛏️ 保护床</div>
+      <div class="cmd-desc">全员留守己方岛，优先攻击靠近床的敌人</div>
+    </button>
+    <button class="cmd-btn" data-cmd="attack">
+      <div class="cmd-title">⚔️ 全体进攻</div>
+      <div class="cmd-desc">全员搭桥出击，攻击敌方角色和床</div>
+    </button>
+    <button class="cmd-btn" data-cmd="follow">
+      <div class="cmd-title">👣 跟我走</div>
+      <div class="cmd-desc">全员紧跟玩家，遇敌时协同作战</div>
+    </button>
+    <button id="cmd-cancel">ESC 取消</button>
+  </div>
+</div>
+
+<!-- Death Screen -->
+<div id="death-screen">
+  <div>你死了!</div>
+  <div class="death-timer" id="respawn-timer">5</div>
+  <div class="death-msg" id="death-msg">复活中...</div>
+</div>
+
+<!-- Game Over -->
+<div id="gameover-screen">
+  <h1 id="gameover-title"></h1>
+  <p id="gameover-msg"></p>
+  <button id="btn-restart">返回主菜单</button>
+</div>
+
+<!-- Click to start -->
+<div id="click-to-start">
+  <div>点击屏幕开始</div>
+  <div class="hint">鼠标将被锁定用于控制视角</div>
+</div>
+
+<!-- Inventory -->
+<div id="inventory-overlay">
+  <div id="inventory-panel">
+    <h2>背包</h2>
+    <div class="inv-grid" id="inv-grid"></div>
+    <button id="inv-close">关闭 (E)</button>
+  </div>
+</div>
+
+<!-- Crafting -->
+<div id="crafting-overlay">
+  <div id="crafting-panel">
+    <h2>工作台</h2>
+    <div id="craft-items"></div>
+    <button id="craft-close">关闭 (ESC)</button>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
