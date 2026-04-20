@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { BLOCK, TEAM_RED, TEAM_BLUE, GRAVITY, WALK_SPEED, PLAYER_HEIGHT, PLAYER_WIDTH,
+import { BLOCK, TEAM_RED, TEAM_BLUE, TEAM_YELLOW, TEAM_GREEN, ALL_TEAMS, TEAM_CONFIG,
+         GRAVITY, WALK_SPEED, PLAYER_HEIGHT, PLAYER_WIDTH,
          AI_SIGHT_RANGE, AI_ATTACK_RANGE, ATTACK_COOLDOWN, KNOCKBACK_FORCE,
          ZOMBIE_HP, ZOMBIE_DAMAGE, ZOMBIE_SIGHT_RANGE, ZOMBIE_RESPAWN_TIME,
          ITEMS, ATTACK_RANGE } from './constants.js';
@@ -354,7 +355,11 @@ export class NPCEntity extends Entity {
     this.hasArmor = false;
     this.blockCount = 0;
 
-    const color = team === TEAM_RED ? 0xcc4444 : 0x4444cc;
+    // Block-breaking state
+    this._breakingBlock = null;
+    this._breakTimer = 0;
+
+    const color = TEAM_CONFIG[team] ? TEAM_CONFIG[team].color : 0xcc4444;
     this.createMesh(color);
   }
 
@@ -478,7 +483,7 @@ export class NPCEntity extends Entity {
 
     // If player is in enemy territory or center, join the attack
     if (player.alive) {
-      const homeIsland = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
+      const homeIsland = this.world.teams[this.team].spawnPos;
       const playerDistFromHome = Math.sqrt(
         (player.position.x - homeIsland.x) ** 2 + (player.position.z - homeIsland.z) ** 2
       );
@@ -499,7 +504,7 @@ export class NPCEntity extends Entity {
     }
 
     // Priority 2: Go near resource spawner to collect resources
-    const spawnerPos = this.team === TEAM_RED ? this.world.redSpawnerPos : this.world.blueSpawnerPos;
+    const spawnerPos = this.world.teams[this.team].spawnerPos;
     if (spawnerPos) {
       const spawnerVec = new THREE.Vector3(spawnerPos.x, spawnerPos.y, spawnerPos.z);
       const distToSpawner = this.position.distanceTo(spawnerVec);
@@ -592,7 +597,7 @@ export class NPCEntity extends Entity {
   }
 
   _goToSpawner(dt) {
-    const spawnerPos = this.team === TEAM_RED ? this.world.redSpawnerPos : this.world.blueSpawnerPos;
+    const spawnerPos = this.world.teams[this.team].spawnerPos;
     if (!spawnerPos) { this._idle(dt); return; }
     const spawnerVec = new THREE.Vector3(spawnerPos.x, spawnerPos.y, spawnerPos.z);
     const dist2D = Math.sqrt(
@@ -650,11 +655,12 @@ export class NPCEntity extends Entity {
   }
 
   _defendBed(dt) {
-    const bedPos = this.team === TEAM_RED ? this.world.redBedPos : this.world.blueBedPos;
+    const teamData = this.world.teams[this.team];
+    const bedPos = teamData.bedPos;
     if (!bedPos) { this.state = 'idle'; return; }
 
     // Patrol OUTSIDE the wool defense ring (radius ~5 from bed center)
-    const spawn = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
+    const spawn = teamData.spawnPos;
     const patrolCenter = new THREE.Vector3(bedPos.x, spawn.y, bedPos.z);
     const dist = this.position.distanceTo(patrolCenter);
 
@@ -679,11 +685,34 @@ export class NPCEntity extends Entity {
   }
 
   _attackEnemyBase(dt) {
-    // Move toward enemy base using pre-built bridges
-    const enemyBed = this.team === TEAM_RED ? this.world.blueBedPos : this.world.redBedPos;
-    if (!enemyBed) { this.state = 'idle'; return; }
+    // Find nearest enemy bed that's still alive
+    let targetBed = null;
+    let targetTeam = null;
+    let minDist = Infinity;
+    for (const t of ALL_TEAMS) {
+      if (t === this.team) continue;
+      const td = this.world.teams[t];
+      if (!td.bedAlive || !td.bedPos) continue;
+      const d = this.position.distanceTo(new THREE.Vector3(td.bedPos.x, td.bedPos.y, td.bedPos.z));
+      if (d < minDist) {
+        minDist = d;
+        targetBed = td.bedPos;
+        targetTeam = t;
+      }
+    }
+    // If no beds alive, target nearest enemy NPC instead
+    if (!targetBed) {
+      const enemy = this._findNearestEnemy();
+      if (enemy) {
+        this.state = 'attack';
+        this.target = enemy;
+      } else {
+        this.state = 'idle';
+      }
+      return;
+    }
 
-    const enemyBedVec = new THREE.Vector3(enemyBed.x, enemyBed.y, enemyBed.z);
+    const enemyBedVec = new THREE.Vector3(targetBed.x, targetBed.y, targetBed.z);
     const dist = this.position.distanceTo(enemyBedVec);
 
     // Attack nearby enemies first
@@ -694,30 +723,15 @@ export class NPCEntity extends Entity {
       return;
     }
 
-    // Pick a bridge path if we haven't yet, or if we're near base
-    if (!this._bridgeZ && this.world.bridgeZPositions) {
-      const bridges = this.world.bridgeZPositions;
-      this._bridgeZ = bridges[Math.floor(Math.random() * bridges.length)];
-    }
-
     if (dist > 3) {
-      // Navigate via bridge: first move to the bridge Z, then along X toward enemy
-      const onBridge = this._bridgeZ && Math.abs(this.position.z - this._bridgeZ) < 2;
-      let target;
-      if (onBridge || Math.abs(this.position.x - enemyBed.x) < 20) {
-        // On bridge or near enemy island: head straight for bed
-        target = enemyBedVec;
-      } else {
-        // Move to bridge entry first
-        target = new THREE.Vector3(this.position.x, this.position.y, this._bridgeZ);
-      }
-      this._moveToward(target, dt);
+      // Navigate directly toward the enemy bed, bridging as needed
+      this._moveToward(enemyBedVec, dt);
     } else {
       // Attack the bed
-      const bedBlock = this.team === TEAM_RED ? BLOCK.BED_BLUE : BLOCK.BED_RED;
-      if (this.world.getBlock(enemyBed.x, enemyBed.y, enemyBed.z) === bedBlock) {
+      const bedBlock = TEAM_CONFIG[targetTeam].bed;
+      if (this.world.getBlock(targetBed.x, targetBed.y, targetBed.z) === bedBlock) {
         if (this.attackCooldown <= 0) {
-          this.world.damageBlock(enemyBed.x, enemyBed.y, enemyBed.z, 1);
+          this.world.damageBlock(targetBed.x, targetBed.y, targetBed.z, 1);
           this.attackCooldown = 0.5;
         }
       }
@@ -744,20 +758,75 @@ export class NPCEntity extends Entity {
     // Jump over obstacles — check 1-2 blocks ahead in movement direction
     const lookY = Math.floor(this.position.y);
     let shouldJump = false;
+    let blockedByBlock = false; // true if obstacle is a breakable block
 
     for (let ahead = 1; ahead <= 2; ahead++) {
       const lx = Math.floor(this.position.x + dir.x * ahead);
       const lz = Math.floor(this.position.z + dir.z * ahead);
-      if (this.world.isSolid(lx, lookY, lz) || this.world.isSolid(lx, lookY + 1, lz)) {
-        shouldJump = true;
-        break;
+      for (let dy = 0; dy <= 1; dy++) {
+        const block = this.world.getBlock(lx, lookY + dy, lz);
+        if (block !== BLOCK.AIR) {
+          shouldJump = true;
+          if (block !== BLOCK.BEDROCK) blockedByBlock = true;
+          break;
+        }
       }
+      if (shouldJump) break;
     }
     // Also check diagonal (for corner collisions)
     if (!shouldJump && Math.abs(dir.x) > 0.1 && Math.abs(dir.z) > 0.1) {
-      const dx = Math.floor(this.position.x + dir.x);
-      const dz = Math.floor(this.position.z + dir.z);
-      if (this.world.isSolid(dx, lookY, dz)) shouldJump = true;
+      const ddx = Math.floor(this.position.x + dir.x);
+      const ddz = Math.floor(this.position.z + dir.z);
+      if (this.world.isSolid(ddx, lookY, ddz)) shouldJump = true;
+    }
+
+    // === BLOCK-BREAKING AI ===
+    // When blocked by a non-bedrock block, try to break it instead of just jumping
+    if (blockedByBlock && this.onGround) {
+      const bx = Math.floor(this.position.x + dir.x);
+      const bz = Math.floor(this.position.z + dir.z);
+      // Try to break body-level and head-level blocks
+      for (let dy = 0; dy <= 1; dy++) {
+        const by = lookY + dy;
+        const block = this.world.getBlock(bx, by, bz);
+        if (block !== BLOCK.AIR && block !== BLOCK.BEDROCK) {
+          // Don't break own team's bed
+          const bedTeam = this.world._bedBlockToTeam(block);
+          if (bedTeam === this.team) continue;
+
+          // Track which block we're breaking
+          if (!this._breakingBlock ||
+              this._breakingBlock.x !== bx || this._breakingBlock.y !== by || this._breakingBlock.z !== bz) {
+            this._breakingBlock = { x: bx, y: by, z: bz };
+            this._breakTimer = 0;
+          }
+          this._breakTimer += dt;
+          // NPCs break at ~3 hits per second
+          const NPC_BREAK_SPEED = 3;
+          const hits = Math.floor(this._breakTimer * NPC_BREAK_SPEED);
+          if (hits > 0) {
+            this._breakTimer -= hits / NPC_BREAK_SPEED;
+            const destroyed = this.world.damageBlock(bx, by, bz, hits);
+            if (destroyed) {
+              this._breakingBlock = null;
+              this._breakTimer = 0;
+              // Spawn break particles
+              if (this.game.spawnBlockParticles) {
+                this.game.spawnBlockParticles(bx, by, bz, block);
+              }
+            }
+          }
+          // Slow down while breaking
+          this.velocity.x *= 0.2;
+          this.velocity.z *= 0.2;
+          shouldJump = false; // don't jump while breaking
+          break;
+        }
+      }
+    } else {
+      // Reset breaking state if not blocked
+      this._breakingBlock = null;
+      this._breakTimer = 0;
     }
 
     if (shouldJump && this.onGround && this.jumpTimer <= 0) {
@@ -769,7 +838,7 @@ export class NPCEntity extends Entity {
     // === PROACTIVE BRIDGING ===
     // Only bridge when heading over actual void (no ground within a few blocks below)
     if (this.blockCount > 0) {
-      const woolType = this.team === TEAM_RED ? BLOCK.WOOL_RED : BLOCK.WOOL_BLUE;
+      const woolType = TEAM_CONFIG[this.team] ? TEAM_CONFIG[this.team].wool : BLOCK.WOOL_RED;
       const footY = Math.floor(this.position.y) - 1;
 
       // Check 1-2 blocks ahead: only bridge if there's no solid block beneath
@@ -848,7 +917,7 @@ export class NPCEntity extends Entity {
   die() {
     super.die();
 
-    const bedAlive = this.team === TEAM_RED ? this.world.redBedAlive : this.world.blueBedAlive;
+    const bedAlive = this.world.teams[this.team].bedAlive;
     if (bedAlive) {
       this.respawnTimer = 5;
     } else {
@@ -862,7 +931,7 @@ export class NPCEntity extends Entity {
     this.hp = this.maxHp;
     this.invincibleTimer = 2;
 
-    const spawn = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
+    const spawn = this.world.teams[this.team].spawnPos;
     // Spawn near the spawn point but only in the safe zone (away from bed wool defense)
     this.position.set(
       spawn.x + (Math.random() - 0.5) * 4,
@@ -930,7 +999,7 @@ export class EnemyAI extends NPCEntity {
 
   _gatherResources(dt) {
     // Stay near spawner and collect resources
-    const spawnerPos = this.team === TEAM_RED ? this.world.redSpawnerPos : this.world.blueSpawnerPos;
+    const spawnerPos = this.world.teams[this.team].spawnerPos;
     if (!spawnerPos) return;
 
     const spawnerVec = new THREE.Vector3(spawnerPos.x, spawnerPos.y, spawnerPos.z);

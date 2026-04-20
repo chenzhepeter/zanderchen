@@ -3,12 +3,14 @@
 // World dimensions
 export const WORLD_WIDTH = 120;  // X axis
 export const WORLD_HEIGHT = 40;  // Y axis
-export const WORLD_DEPTH = 50;   // Z axis
+export const WORLD_DEPTH = 120;  // Z axis
 
 // Island positions (center X, base Y, center Z)
-export const RED_ISLAND = { cx: 15, cy: 15, cz: 25, size: 8 };
-export const BLUE_ISLAND = { cx: 105, cy: 15, cz: 25, size: 8 };
-export const CENTER_ISLAND = { cx: 60, cy: 13, cz: 25, size: 14 };
+export const RED_ISLAND = { cx: 15, cy: 15, cz: 60, size: 8 };    // West
+export const BLUE_ISLAND = { cx: 105, cy: 15, cz: 60, size: 8 };  // East
+export const YELLOW_ISLAND = { cx: 60, cy: 15, cz: 15, size: 8 }; // North
+export const GREEN_ISLAND = { cx: 60, cy: 15, cz: 105, size: 8 }; // South
+export const CENTER_ISLAND = { cx: 60, cy: 13, cz: 60, size: 14 };
 
 // Block types
 export const BLOCK = {
@@ -34,6 +36,10 @@ export const BLOCK = {
   BRIDGE_TEMP: 19, // temporary bridge egg blocks
   TNT: 20,
   BEDROCK: 21,
+  BED_YELLOW: 22,
+  BED_GREEN: 23,
+  WOOL_YELLOW: 24,
+  WOOL_GREEN: 25,
 };
 
 // Block colors
@@ -59,6 +65,10 @@ export const BLOCK_COLORS = {
   [BLOCK.BRIDGE_TEMP]: 0xffff88,
   [BLOCK.TNT]: 0xff4444,
   [BLOCK.BEDROCK]: 0x333333,
+  [BLOCK.BED_YELLOW]: 0xdddd22,
+  [BLOCK.BED_GREEN]: 0x22dd22,
+  [BLOCK.WOOL_YELLOW]: 0xcccc44,
+  [BLOCK.WOOL_GREEN]: 0x44cc44,
 };
 
 // Block durability (hits to break)
@@ -84,6 +94,10 @@ export const BLOCK_DURABILITY = {
   [BLOCK.BRIDGE_TEMP]: 1,
   [BLOCK.TNT]: 1,
   [BLOCK.BEDROCK]: 999,
+  [BLOCK.BED_YELLOW]: 15,
+  [BLOCK.BED_GREEN]: 15,
+  [BLOCK.WOOL_YELLOW]: 2,
+  [BLOCK.WOOL_GREEN]: 2,
 };
 
 // Item definitions
@@ -228,3 +242,14 @@ export const ZOMBIE_RESPAWN_TIME = 30;
 // Teams
 export const TEAM_RED = 'red';
 export const TEAM_BLUE = 'blue';
+export const TEAM_YELLOW = 'yellow';
+export const TEAM_GREEN = 'green';
+export const ALL_TEAMS = [TEAM_RED, TEAM_BLUE, TEAM_YELLOW, TEAM_GREEN];
+
+// Team config (bed block, wool block, mesh color, Chinese name)
+export const TEAM_CONFIG = {
+  [TEAM_RED]:    { bed: BLOCK.BED_RED,    wool: BLOCK.WOOL_RED,    color: 0xcc4444, name: '红队' },
+  [TEAM_BLUE]:   { bed: BLOCK.BED_BLUE,   wool: BLOCK.WOOL_BLUE,   color: 0x4444cc, name: '蓝队' },
+  [TEAM_YELLOW]: { bed: BLOCK.BED_YELLOW, wool: BLOCK.WOOL_YELLOW, color: 0xcccc44, name: '黄队' },
+  [TEAM_GREEN]:  { bed: BLOCK.BED_GREEN,  wool: BLOCK.WOOL_GREEN,  color: 0x44cc44, name: '绿队' },
+};

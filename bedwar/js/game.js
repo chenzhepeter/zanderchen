@@ -5,8 +5,10 @@ import { NPCEntity, EnemyAI, ZombieEntity, MerchantEntity,
          DroppedItem, CurrencyDrop, ArrowProjectile } from './entities.js';
 import { HUD } from './hud.js';
 import { AudioSystem } from './audio.js';
-import { TEAM_RED, TEAM_BLUE, RESOURCE_COPPER_INTERVAL, RESOURCE_IRON_INTERVAL,
-         PREP_PHASE_TIME, MAX_GAME_TIME, BLOCK, BLOCK_COLORS, ATTACK_RANGE, ITEMS } from './constants.js';
+import { TEAM_RED, TEAM_BLUE, TEAM_YELLOW, TEAM_GREEN, ALL_TEAMS, TEAM_CONFIG,
+         RESOURCE_COPPER_INTERVAL, RESOURCE_IRON_INTERVAL,
+         PREP_PHASE_TIME, MAX_GAME_TIME, BLOCK, BLOCK_COLORS, ATTACK_RANGE, ITEMS,
+         KNOCKBACK_FORCE } from './constants.js';
 
 export class Game {
   constructor() {
@@ -20,7 +22,7 @@ export class Game {
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x87ceeb, 80, 150);
+    this.scene.fog = new THREE.Fog(0x87ceeb, 80, 200);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -45,17 +47,17 @@ export class Game {
     });
     const voidPlane = new THREE.Mesh(voidGeo, voidMat);
     voidPlane.rotation.x = -Math.PI / 2;
-    voidPlane.position.set(60, -2, 25);
+    voidPlane.position.set(60, -2, 60);
     this.scene.add(voidPlane);
 
     // Void fog particles (subtle floating particles below islands)
     const starGeo = new THREE.BufferGeometry();
     const starVertices = [];
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 300; i++) {
       starVertices.push(
         Math.random() * 200 - 40,
         Math.random() * 10 - 5,
-        Math.random() * 100 - 25
+        Math.random() * 200 - 40
       );
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
@@ -70,8 +72,7 @@ export class Game {
     this.player = new Player(this);
 
     // Entities
-    this.redTeamNPCs = [];
-    this.blueTeamNPCs = [];
+    this.teamNPCs = { red: [], blue: [], yellow: [], green: [] };
     this.zombies = [];
     this.merchants = [];
     this.droppedItems = [];
@@ -91,8 +92,7 @@ export class Game {
     this.centerResourceTimer = 0;
 
     // Bed state tracking
-    this.lastRedBedState = true;
-    this.lastBlueBedState = true;
+    this.lastBedState = { red: true, blue: true, yellow: true, green: true };
 
     // Audio
     this.audio = new AudioSystem();
@@ -117,7 +117,7 @@ export class Game {
     this.world.rebuildMesh();
 
     // Set player position
-    const spawn = this.world.redSpawnPos;
+    const spawn = this.world.teams.red.spawnPos;
     this.player.position.set(spawn.x, spawn.y, spawn.z);
     this.player.team = TEAM_RED;
     // Face toward center island (positive X direction)
@@ -126,8 +126,7 @@ export class Game {
     // Give player starting items
     this.player.addItem(ITEMS.WOOD_SWORD, 1);
 
-    // Create red team NPCs (3 teammates)
-    // Spawn outside wool defense (wool is at cz-1..cz+1, spawn.z = cz+3)
+    // Create red team NPCs (3 teammates, follow player)
     const redNames = ['队友1', '队友2', '队友3'];
     for (let i = 0; i < 3; i++) {
       const pos = new THREE.Vector3(
@@ -137,22 +136,29 @@ export class Game {
       );
       const npc = new NPCEntity(this, pos, TEAM_RED, redNames[i]);
       npc.command = 'follow';
-      npc.blockCount = 64; // start with bridge blocks
-      this.redTeamNPCs.push(npc);
+      npc.blockCount = 96;
+      this.teamNPCs.red.push(npc);
     }
 
-    // Create blue team NPCs (4 enemies)
-    const blueSpawn = this.world.blueSpawnPos;
-    const blueNames = ['敌人1', '敌人2', '敌人3', '敌人4'];
-    for (let i = 0; i < 4; i++) {
-      const pos = new THREE.Vector3(
-        blueSpawn.x + (i - 1.5) * 2,
-        blueSpawn.y,
-        blueSpawn.z
-      );
-      const enemy = new EnemyAI(this, pos, TEAM_BLUE, blueNames[i]);
-      enemy.blockCount = 64;
-      this.blueTeamNPCs.push(enemy);
+    // Create enemy team NPCs (3 per enemy team)
+    const enemyTeams = [TEAM_BLUE, TEAM_YELLOW, TEAM_GREEN];
+    const teamLabels = {
+      [TEAM_BLUE]: '蓝',
+      [TEAM_YELLOW]: '黄',
+      [TEAM_GREEN]: '绿',
+    };
+    for (const team of enemyTeams) {
+      const teamSpawn = this.world.teams[team].spawnPos;
+      for (let i = 0; i < 3; i++) {
+        const pos = new THREE.Vector3(
+          teamSpawn.x + (i - 1) * 2,
+          teamSpawn.y,
+          teamSpawn.z
+        );
+        const enemy = new EnemyAI(this, pos, team, `${teamLabels[team]}${i + 1}`);
+        enemy.blockCount = 96;
+        this.teamNPCs[team].push(enemy);
+      }
     }
 
     // Create zombies on center island
@@ -161,20 +167,16 @@ export class Game {
       this.zombies.push(zombie);
     }
 
-    // Create merchants
-    if (this.world.redMerchantPos) {
-      const rm = new MerchantEntity(this,
-        new THREE.Vector3(this.world.redMerchantPos.x, this.world.redMerchantPos.y, this.world.redMerchantPos.z),
-        TEAM_RED
-      );
-      this.merchants.push(rm);
-    }
-    if (this.world.blueMerchantPos) {
-      const bm = new MerchantEntity(this,
-        new THREE.Vector3(this.world.blueMerchantPos.x, this.world.blueMerchantPos.y, this.world.blueMerchantPos.z),
-        TEAM_BLUE
-      );
-      this.merchants.push(bm);
+    // Create merchants (one per team)
+    for (const team of ALL_TEAMS) {
+      const mPos = this.world.teams[team].merchantPos;
+      if (mPos) {
+        const merchant = new MerchantEntity(this,
+          new THREE.Vector3(mPos.x, mPos.y, mPos.z),
+          team
+        );
+        this.merchants.push(merchant);
+      }
     }
   }
 
@@ -225,17 +227,14 @@ export class Game {
       // Check time limit
       if (this.gameTime >= MAX_GAME_TIME) {
         // Destroy all beds
-        this.world.redBedAlive = false;
-        this.world.blueBedAlive = false;
         this.hud.showNotification('⏰ 时间到! 所有床被摧毁 - 绝杀模式!', 5);
-        // Remove bed blocks
-        if (this.world.redBedPos) {
-          this.world.setBlock(this.world.redBedPos.x, this.world.redBedPos.y, this.world.redBedPos.z, BLOCK.AIR);
-          this.world.setBlock(this.world.redBedPos.x + 1, this.world.redBedPos.y, this.world.redBedPos.z, BLOCK.AIR);
-        }
-        if (this.world.blueBedPos) {
-          this.world.setBlock(this.world.blueBedPos.x, this.world.blueBedPos.y, this.world.blueBedPos.z, BLOCK.AIR);
-          this.world.setBlock(this.world.blueBedPos.x + 1, this.world.blueBedPos.y, this.world.blueBedPos.z, BLOCK.AIR);
+        for (const team of ALL_TEAMS) {
+          const td = this.world.teams[team];
+          td.bedAlive = false;
+          if (td.bedPos) {
+            this.world.setBlock(td.bedPos.x, td.bedPos.y, td.bedPos.z, BLOCK.AIR);
+            this.world.setBlock(td.bedPos.x + 1, td.bedPos.y, td.bedPos.z, BLOCK.AIR);
+          }
         }
       }
     }
@@ -250,8 +249,9 @@ export class Game {
     this.player.update(dt);
 
     // Update entities
-    for (const npc of this.redTeamNPCs) npc.update(dt);
-    for (const npc of this.blueTeamNPCs) npc.update(dt);
+    for (const team of ALL_TEAMS) {
+      for (const npc of this.teamNPCs[team]) npc.update(dt);
+    }
     for (const zombie of this.zombies) zombie.update(dt);
     for (const merchant of this.merchants) merchant.update(dt);
 
@@ -288,7 +288,7 @@ export class Game {
         continue;
       }
       // NPC pickup
-      const allNPCs = [...this.redTeamNPCs, ...this.blueTeamNPCs];
+      const allNPCs = this.getAllNPCs();
       let picked = false;
       for (const npc of allNPCs) {
         if (npc.alive && npc.position.distanceTo(drop.position) < 2) {
@@ -315,8 +315,8 @@ export class Game {
       if (this.tntTimers[i].timer <= 0) {
         const t = this.tntTimers[i];
         this.world.explodeTNT(t.x, t.y, t.z);
-        this._explosionDamage(t.x, t.y, t.z, 4);
-        this.spawnBlockParticles(t.x + 0.5, t.y + 0.5, t.z + 0.5, BLOCK.TNT);
+        this._explosionDamage(t.x + 0.5, t.y + 0.5, t.z + 0.5, 4);
+        this._spawnExplosionEffect(t.x + 0.5, t.y + 0.5, t.z + 0.5, 4);
         this.audio.playExplosion();
         this.tntTimers.splice(i, 1);
       }
@@ -350,57 +350,33 @@ export class Game {
 
   // ==================== RESOURCE SPAWNING ====================
   _updateResourceSpawning(dt) {
-    // Copper spawning at team islands
+    // Copper spawning at all team islands
     this.copperTimer += dt;
     if (this.copperTimer >= RESOURCE_COPPER_INTERVAL) {
       this.copperTimer = 0;
-      // Red spawner
-      if (this.world.redSpawnerPos) {
-        this.spawnCurrencyDrops(
-          new THREE.Vector3(
-            this.world.redSpawnerPos.x + (Math.random() - 0.5),
-            this.world.redSpawnerPos.y + 0.5,
-            this.world.redSpawnerPos.z + (Math.random() - 0.5)
-          ),
-          [{ type: 'copper', amount: 1 }]
-        );
-      }
-      // Blue spawner
-      if (this.world.blueSpawnerPos) {
-        this.spawnCurrencyDrops(
-          new THREE.Vector3(
-            this.world.blueSpawnerPos.x + (Math.random() - 0.5),
-            this.world.blueSpawnerPos.y + 0.5,
-            this.world.blueSpawnerPos.z + (Math.random() - 0.5)
-          ),
-          [{ type: 'copper', amount: 1 }]
-        );
+      for (const team of ALL_TEAMS) {
+        const sp = this.world.teams[team].spawnerPos;
+        if (sp) {
+          this.spawnCurrencyDrops(
+            new THREE.Vector3(sp.x + (Math.random() - 0.5), sp.y + 0.5, sp.z + (Math.random() - 0.5)),
+            [{ type: 'copper', amount: 1 }]
+          );
+        }
       }
     }
 
-    // Iron spawning
+    // Iron spawning at all team islands
     this.ironTimer += dt;
     if (this.ironTimer >= RESOURCE_IRON_INTERVAL) {
       this.ironTimer = 0;
-      if (this.world.redSpawnerPos) {
-        this.spawnCurrencyDrops(
-          new THREE.Vector3(
-            this.world.redSpawnerPos.x + (Math.random() - 0.5),
-            this.world.redSpawnerPos.y + 0.5,
-            this.world.redSpawnerPos.z + (Math.random() - 0.5)
-          ),
-          [{ type: 'iron', amount: 1 }]
-        );
-      }
-      if (this.world.blueSpawnerPos) {
-        this.spawnCurrencyDrops(
-          new THREE.Vector3(
-            this.world.blueSpawnerPos.x + (Math.random() - 0.5),
-            this.world.blueSpawnerPos.y + 0.5,
-            this.world.blueSpawnerPos.z + (Math.random() - 0.5)
-          ),
-          [{ type: 'iron', amount: 1 }]
-        );
+      for (const team of ALL_TEAMS) {
+        const sp = this.world.teams[team].spawnerPos;
+        if (sp) {
+          this.spawnCurrencyDrops(
+            new THREE.Vector3(sp.x + (Math.random() - 0.5), sp.y + 0.5, sp.z + (Math.random() - 0.5)),
+            [{ type: 'iron', amount: 1 }]
+          );
+        }
       }
     }
 
@@ -520,7 +496,17 @@ export class Game {
       const dist = entity.position.distanceTo(center);
       if (dist < radius) {
         const damage = Math.floor(10 * (1 - dist / radius));
-        entity.takeDamage(damage, { position: center });
+        // Apply damage without knockback from takeDamage (we'll add our own)
+        entity.takeDamage(damage);
+
+        // Explosion knockback — stronger than melee
+        const dir = new THREE.Vector3().subVectors(entity.position, center);
+        if (dir.length() > 0.01) dir.normalize();
+        else dir.set(0, 1, 0);
+        const knockbackStrength = KNOCKBACK_FORCE * 2 * (1 - dist / radius);
+        entity.velocity.x += dir.x * knockbackStrength;
+        entity.velocity.y += Math.abs(dir.y + 0.5) * knockbackStrength * 0.8;
+        entity.velocity.z += dir.z * knockbackStrength;
       }
     }
   }
@@ -598,7 +584,76 @@ export class Game {
     }
   }
 
+  _spawnExplosionEffect(x, y, z, radius) {
+    // Fiery explosion particles (orange/yellow/white)
+    const colors = [0xff6600, 0xffaa00, 0xffcc44, 0xffffff, 0xff4400];
+    for (let i = 0; i < 35; i++) {
+      const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+      const p = new THREE.Mesh(geo, mat);
+      p.position.set(x, y, z);
+      this.scene.add(p);
+      const speed = 3 + Math.random() * 8;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI;
+      this.particles.push({
+        mesh: p,
+        vx: Math.sin(phi) * Math.cos(theta) * speed,
+        vy: Math.cos(phi) * speed * 0.8 + 2,
+        vz: Math.sin(phi) * Math.sin(theta) * speed,
+        life: 0.4 + Math.random() * 0.5,
+      });
+    }
+
+    // Smoke particles (delayed effect via slower, darker particles)
+    for (let i = 0; i < 12; i++) {
+      const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+      const gray = 0x30 + Math.floor(Math.random() * 0x30);
+      const mat = new THREE.MeshBasicMaterial({
+        color: (gray << 16) | (gray << 8) | gray,
+        transparent: true, opacity: 0.7,
+      });
+      const p = new THREE.Mesh(geo, mat);
+      p.position.set(
+        x + (Math.random() - 0.5) * 2,
+        y + Math.random(),
+        z + (Math.random() - 0.5) * 2
+      );
+      this.scene.add(p);
+      this.particles.push({
+        mesh: p,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: 1 + Math.random() * 2,
+        vz: (Math.random() - 0.5) * 1.5,
+        life: 1.0 + Math.random() * 0.8,
+      });
+    }
+
+    // Flash light
+    const flash = new THREE.PointLight(0xff8800, 8, radius * 4);
+    flash.position.set(x, y, z);
+    this.scene.add(flash);
+    this._explosionLights = this._explosionLights || [];
+    this._explosionLights.push({ light: flash, life: 0.3 });
+  }
+
   _updateParticles(dt) {
+    // Update explosion lights
+    if (this._explosionLights) {
+      for (let i = this._explosionLights.length - 1; i >= 0; i--) {
+        const el = this._explosionLights[i];
+        el.life -= dt;
+        if (el.life <= 0) {
+          this.scene.remove(el.light);
+          el.light.dispose();
+          this._explosionLights.splice(i, 1);
+        } else {
+          el.light.intensity = 8 * (el.life / 0.3);
+        }
+      }
+    }
+
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= dt;
@@ -621,20 +676,24 @@ export class Game {
 
   // ==================== ENTITY HELPERS ====================
   getAllEntities() {
-    return [...this.redTeamNPCs, ...this.blueTeamNPCs, ...this.zombies];
+    const npcs = [];
+    for (const team of ALL_TEAMS) npcs.push(...this.teamNPCs[team]);
+    return [...npcs, ...this.zombies];
   }
 
   getAllNPCs() {
-    return [...this.redTeamNPCs, ...this.blueTeamNPCs];
+    const npcs = [];
+    for (const team of ALL_TEAMS) npcs.push(...this.teamNPCs[team]);
+    return npcs;
   }
 
   getTeamMembers(team) {
-    return team === TEAM_RED ? this.redTeamNPCs : this.blueTeamNPCs;
+    return this.teamNPCs[team] || [];
   }
 
   // ==================== GAME FLOW ====================
   setTeamCommand(cmd) {
-    for (const npc of this.redTeamNPCs) {
+    for (const npc of this.teamNPCs.red) {
       npc.command = cmd;
     }
     const cmdNames = { defend: '保护床', attack: '全体进攻', follow: '跟我走' };
@@ -642,13 +701,11 @@ export class Game {
   }
 
   _checkBedStates() {
-    if (this.lastRedBedState && !this.world.redBedAlive) {
-      this.lastRedBedState = false;
-      this.hud.showBedDestroyed(TEAM_RED);
-    }
-    if (this.lastBlueBedState && !this.world.blueBedAlive) {
-      this.lastBlueBedState = false;
-      this.hud.showBedDestroyed(TEAM_BLUE);
+    for (const team of ALL_TEAMS) {
+      if (this.lastBedState[team] && !this.world.teams[team].bedAlive) {
+        this.lastBedState[team] = false;
+        this.hud.showBedDestroyed(team);
+      }
     }
   }
 
@@ -659,24 +716,31 @@ export class Game {
   checkWinCondition() {
     if (this.phase === 'over') return;
 
-    // Check if all red team is eliminated
+    // Check if red team (player) is eliminated
     const redAlive = this.player.alive || this.player.respawnTimer > 0 ||
-      this.redTeamNPCs.some(n => n.alive || (!n.eliminated && n.respawnTimer > 0));
-    const redCanRespawn = this.world.redBedAlive;
-
-    // Check if all blue team is eliminated
-    const blueAlive = this.blueTeamNPCs.some(n => n.alive || (!n.eliminated && n.respawnTimer > 0));
-    const blueCanRespawn = this.world.blueBedAlive;
+      this.teamNPCs.red.some(n => n.alive || (!n.eliminated && n.respawnTimer > 0));
+    const redCanRespawn = this.world.teams.red.bedAlive;
 
     if (!redAlive && !redCanRespawn) {
-      // Blue wins
+      // Player loses
       this.phase = 'over';
       this.hud.showGameOver(false);
       return;
     }
 
-    if (!blueAlive && !blueCanRespawn) {
-      // Red wins
+    // Check if all enemy teams are eliminated
+    let allEnemiesDead = true;
+    for (const team of [TEAM_BLUE, TEAM_YELLOW, TEAM_GREEN]) {
+      const teamAlive = this.teamNPCs[team].some(n => n.alive || (!n.eliminated && n.respawnTimer > 0));
+      const canRespawn = this.world.teams[team].bedAlive;
+      if (teamAlive || canRespawn) {
+        allEnemiesDead = false;
+        break;
+      }
+    }
+
+    if (allEnemiesDead) {
+      // Player wins
       this.phase = 'over';
       this.hud.showGameOver(true);
       return;
@@ -707,8 +771,8 @@ export class Game {
       }
     }
 
-    // Check if near crafting table (check both teams' tables, player might be on enemy island)
-    const craftPositions = [this.world.redCraftPos, this.world.blueCraftPos].filter(Boolean);
+    // Check if near crafting table (check all teams' tables, player might be on enemy island)
+    const craftPositions = ALL_TEAMS.map(t => this.world.teams[t].craftPos).filter(Boolean);
     for (const craftPos of craftPositions) {
       const craftVec = new THREE.Vector3(craftPos.x, craftPos.y, craftPos.z);
       const dist = this.player.position.distanceTo(craftVec);

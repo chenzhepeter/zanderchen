@@ -1,4 +1,5 @@
-import { TEAM_RED, SHOP_CATEGORIES, RECIPES, ITEMS } from './constants.js';
+import { TEAM_RED, TEAM_BLUE, TEAM_YELLOW, TEAM_GREEN, ALL_TEAMS, TEAM_CONFIG,
+         SHOP_CATEGORIES, RECIPES, ITEMS } from './constants.js';
 
 export class HUD {
   constructor(game) {
@@ -167,27 +168,40 @@ export class HUD {
 
   _updateTeamPanels() {
     const player = this.game.player;
-    const redTeam = this.game.getTeamMembers(TEAM_RED);
-    const blueTeam = this.game.getTeamMembers('blue');
+    const teamIcons = { red: '🔴', blue: '🔵', yellow: '🟡', green: '🟢' };
 
-    // Left panel (player's team = red)
-    let leftHtml = '<div style="font-weight:bold;margin-bottom:4px;">🔴 红队</div>';
-    // Add player
+    // Left panel: player's team (red) + yellow team
+    let leftHtml = `<div style="font-weight:bold;margin-bottom:4px;">${teamIcons.red} ${TEAM_CONFIG.red.name}</div>`;
     leftHtml += this._memberHtml('你', player.hp, player.maxHp, player.alive, player.eliminated);
-    for (const m of redTeam) {
+    for (const m of this.game.getTeamMembers(TEAM_RED)) {
       leftHtml += this._memberHtml(m.name, m.hp, m.maxHp, m.alive, m.eliminated);
     }
-    const redBedIcon = this.game.world.redBedAlive ? '🛏️ 床:完好' : '🛏️ 床:已毁';
-    leftHtml += `<div style="margin-top:4px;font-size:12px;color:${this.game.world.redBedAlive ? '#5f5' : '#f55'}">${redBedIcon}</div>`;
+    const redBed = this.game.world.teams.red.bedAlive;
+    leftHtml += `<div style="margin-top:4px;font-size:12px;color:${redBed ? '#5f5' : '#f55'}">🛏️ 床:${redBed ? '完好' : '已毁'}</div>`;
+
+    // Add yellow team below red
+    leftHtml += `<div style="font-weight:bold;margin:8px 0 4px;">${teamIcons.yellow} ${TEAM_CONFIG.yellow.name}</div>`;
+    for (const m of this.game.getTeamMembers(TEAM_YELLOW)) {
+      leftHtml += this._memberHtml(m.name, m.hp, m.maxHp, m.alive, m.eliminated);
+    }
+    const yellowBed = this.game.world.teams.yellow.bedAlive;
+    leftHtml += `<div style="margin-top:4px;font-size:12px;color:${yellowBed ? '#5f5' : '#f55'}">🛏️ 床:${yellowBed ? '完好' : '已毁'}</div>`;
     this.elements.teamLeft.innerHTML = leftHtml;
 
-    // Right panel (blue team)
-    let rightHtml = '<div style="font-weight:bold;margin-bottom:4px;">🔵 蓝队</div>';
-    for (const m of blueTeam) {
+    // Right panel: blue team + green team
+    let rightHtml = `<div style="font-weight:bold;margin-bottom:4px;">${teamIcons.blue} ${TEAM_CONFIG.blue.name}</div>`;
+    for (const m of this.game.getTeamMembers(TEAM_BLUE)) {
       rightHtml += this._memberHtml(m.name, m.hp, m.maxHp, m.alive, m.eliminated);
     }
-    const blueBedIcon = this.game.world.blueBedAlive ? '🛏️ 床:完好' : '🛏️ 床:已毁';
-    rightHtml += `<div style="margin-top:4px;font-size:12px;color:${this.game.world.blueBedAlive ? '#5f5' : '#f55'}">${blueBedIcon}</div>`;
+    const blueBed = this.game.world.teams.blue.bedAlive;
+    rightHtml += `<div style="margin-top:4px;font-size:12px;color:${blueBed ? '#5f5' : '#f55'}">🛏️ 床:${blueBed ? '完好' : '已毁'}</div>`;
+
+    rightHtml += `<div style="font-weight:bold;margin:8px 0 4px;">${teamIcons.green} ${TEAM_CONFIG.green.name}</div>`;
+    for (const m of this.game.getTeamMembers(TEAM_GREEN)) {
+      rightHtml += this._memberHtml(m.name, m.hp, m.maxHp, m.alive, m.eliminated);
+    }
+    const greenBed = this.game.world.teams.green.bedAlive;
+    rightHtml += `<div style="margin-top:4px;font-size:12px;color:${greenBed ? '#5f5' : '#f55'}">🛏️ 床:${greenBed ? '完好' : '已毁'}</div>`;
     this.elements.teamRight.innerHTML = rightHtml;
   }
 
@@ -212,7 +226,8 @@ export class HUD {
   showBedDestroyed(team) {
     const el = document.createElement('div');
     el.className = 'bed-destroyed-alert';
-    el.textContent = team === TEAM_RED ? '🛏️ 红队的床被摧毁了!' : '🛏️ 蓝队的床被摧毁了!';
+    const cfg = TEAM_CONFIG[team];
+    el.textContent = `🛏️ ${cfg ? cfg.name : team}的床被摧毁了!`;
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 2500);
   }

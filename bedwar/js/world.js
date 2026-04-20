@@ -1,8 +1,27 @@
 import * as THREE from 'three';
 import { BLOCK, BLOCK_COLORS, BLOCK_DURABILITY, WORLD_WIDTH, WORLD_HEIGHT, WORLD_DEPTH,
-         RED_ISLAND, BLUE_ISLAND, CENTER_ISLAND } from './constants.js';
+         RED_ISLAND, BLUE_ISLAND, YELLOW_ISLAND, GREEN_ISLAND, CENTER_ISLAND,
+         TEAM_CONFIG, ALL_TEAMS } from './constants.js';
 
 const CHUNK_SIZE = 16;
+
+// Island configs: direction facing center for offset rotation
+const ISLAND_CONFIGS = {
+  red:    { island: RED_ISLAND,    facing: 'east'  },  // West island faces east toward center
+  blue:   { island: BLUE_ISLAND,   facing: 'west'  },  // East island faces west toward center
+  yellow: { island: YELLOW_ISLAND, facing: 'south' },  // North island faces south toward center
+  green:  { island: GREEN_ISLAND,  facing: 'north' },  // South island faces north toward center
+};
+
+// Rotate offset (dx, dz) based on facing direction
+function rotateOffset(dx, dz, facing) {
+  switch (facing) {
+    case 'east':  return { dx, dz };            // default orientation
+    case 'west':  return { dx: -dx, dz: -dz };
+    case 'south': return { dx: dz, dz: dx };    // swap and adjust
+    case 'north': return { dx: -dz, dz: -dx };
+  }
+}
 
 export class VoxelWorld {
   constructor(scene) {
@@ -24,22 +43,46 @@ export class VoxelWorld {
 
     this.tempBridges = [];
 
-    // Positions
-    this.redBedPos = null;
-    this.blueBedPos = null;
-    this.redBedAlive = true;
-    this.blueBedAlive = true;
-    this.redSpawnerPos = null;
-    this.blueSpawnerPos = null;
-    this.redMerchantPos = null;
-    this.blueMerchantPos = null;
-    this.redCraftPos = null;
-    this.blueCraftPos = null;
+    // Team data (populated by generateMap)
+    this.teams = {};
+    for (const team of ALL_TEAMS) {
+      this.teams[team] = {
+        bedPos: null,
+        bedAlive: true,
+        spawnerPos: null,
+        merchantPos: null,
+        craftPos: null,
+        spawnPos: null,
+      };
+    }
+
+    // Backward-compatible getters
     this.centerResourcePositions = [];
-    this.redSpawnPos = null;
-    this.blueSpawnPos = null;
+    this.centerItemPositions = [];
     this.zombieSpawnPositions = [];
   }
+
+  // Backward-compatible bed alive getters/setters
+  get redBedAlive() { return this.teams.red.bedAlive; }
+  set redBedAlive(v) { this.teams.red.bedAlive = v; }
+  get blueBedAlive() { return this.teams.blue.bedAlive; }
+  set blueBedAlive(v) { this.teams.blue.bedAlive = v; }
+  get yellowBedAlive() { return this.teams.yellow.bedAlive; }
+  set yellowBedAlive(v) { this.teams.yellow.bedAlive = v; }
+  get greenBedAlive() { return this.teams.green.bedAlive; }
+  set greenBedAlive(v) { this.teams.green.bedAlive = v; }
+
+  // Backward-compatible position getters
+  get redSpawnerPos() { return this.teams.red.spawnerPos; }
+  get blueSpawnerPos() { return this.teams.blue.spawnerPos; }
+  get redMerchantPos() { return this.teams.red.merchantPos; }
+  get blueMerchantPos() { return this.teams.blue.merchantPos; }
+  get redCraftPos() { return this.teams.red.craftPos; }
+  get blueCraftPos() { return this.teams.blue.craftPos; }
+  get redSpawnPos() { return this.teams.red.spawnPos; }
+  get blueSpawnPos() { return this.teams.blue.spawnPos; }
+  get redBedPos() { return this.teams.red.bedPos; }
+  get blueBedPos() { return this.teams.blue.bedPos; }
 
   index(x, y, z) {
     return x + z * this.width + y * this.width * this.depth;
@@ -53,7 +96,6 @@ export class VoxelWorld {
   setBlock(x, y, z, type) {
     if (x < 0 || x >= this.width || y < 0 || y >= this.height || z < 0 || z >= this.depth) return;
     this.blocks[this.index(x, y, z)] = type;
-    // Mark this chunk and neighbors dirty
     this._markChunkDirty(x, y, z);
   }
 
@@ -62,7 +104,6 @@ export class VoxelWorld {
     const cy = Math.floor(y / CHUNK_SIZE);
     const cz = Math.floor(z / CHUNK_SIZE);
     this.dirtyChunks.add(`${cx},${cy},${cz}`);
-    // Mark neighbor chunks if block is on edge
     if (x % CHUNK_SIZE === 0 && cx > 0) this.dirtyChunks.add(`${cx-1},${cy},${cz}`);
     if (x % CHUNK_SIZE === CHUNK_SIZE - 1 && cx < this.chunksX - 1) this.dirtyChunks.add(`${cx+1},${cy},${cz}`);
     if (y % CHUNK_SIZE === 0 && cy > 0) this.dirtyChunks.add(`${cx},${cy-1},${cz}`);
@@ -75,6 +116,15 @@ export class VoxelWorld {
     return this.getBlock(x, y, z) !== BLOCK.AIR;
   }
 
+  // Map bed block types to teams
+  _bedBlockToTeam(block) {
+    if (block === BLOCK.BED_RED) return 'red';
+    if (block === BLOCK.BED_BLUE) return 'blue';
+    if (block === BLOCK.BED_YELLOW) return 'yellow';
+    if (block === BLOCK.BED_GREEN) return 'green';
+    return null;
+  }
+
   damageBlock(x, y, z, amount = 1) {
     const block = this.getBlock(x, y, z);
     if (block === BLOCK.AIR || block === BLOCK.BEDROCK) return false;
@@ -84,8 +134,8 @@ export class VoxelWorld {
     const maxHp = BLOCK_DURABILITY[block] || 5;
 
     if (this.blockDamage[key] >= maxHp) {
-      if (block === BLOCK.BED_RED) this.redBedAlive = false;
-      else if (block === BLOCK.BED_BLUE) this.blueBedAlive = false;
+      const bedTeam = this._bedBlockToTeam(block);
+      if (bedTeam) this.teams[bedTeam].bedAlive = false;
       this.setBlock(x, y, z, BLOCK.AIR);
       delete this.blockDamage[key];
       return true;
@@ -95,10 +145,13 @@ export class VoxelWorld {
 
   // ==================== MAP GENERATION ====================
   generateMap() {
-    this._generateIsland(RED_ISLAND.cx, RED_ISLAND.cy, RED_ISLAND.cz, RED_ISLAND.size, 'red');
-    this._generateIsland(BLUE_ISLAND.cx, BLUE_ISLAND.cy, BLUE_ISLAND.cz, BLUE_ISLAND.size, 'blue');
+    for (const team of ALL_TEAMS) {
+      const config = ISLAND_CONFIGS[team];
+      const { cx, cy, cz, size } = config.island;
+      this._generateIsland(cx, cy, cz, size, team, config.facing);
+    }
     this._generateCenterIsland();
-    this._generateBridges();
+    // No bridges - players/NPCs must build their own!
     // Mark all chunks dirty for initial build
     for (let cx = 0; cx < this.chunksX; cx++)
       for (let cy = 0; cy < this.chunksY; cy++)
@@ -106,7 +159,8 @@ export class VoxelWorld {
           this.dirtyChunks.add(`${cx},${cy},${cz}`);
   }
 
-  _generateIsland(cx, cy, cz, size, team) {
+  _generateIsland(cx, cy, cz, size, team, facing) {
+    // Generate circular island terrain
     for (let x = cx - size; x <= cx + size; x++) {
       for (let z = cz - size; z <= cz + size; z++) {
         const dx = x - cx, dz = z - cz;
@@ -119,37 +173,52 @@ export class VoxelWorld {
       }
     }
 
-    const bedBlock = team === 'red' ? BLOCK.BED_RED : BLOCK.BED_BLUE;
-    this.blocks[this.index(cx, cy + 1, cz)] = bedBlock;
-    this.blocks[this.index(cx + 1, cy + 1, cz)] = bedBlock;
-    if (team === 'red') this.redBedPos = { x: cx, y: cy + 1, z: cz };
-    else this.blueBedPos = { x: cx, y: cy + 1, z: cz };
+    const teamCfg = TEAM_CONFIG[team];
 
-    const woolBlock = team === 'red' ? BLOCK.WOOL_RED : BLOCK.WOOL_BLUE;
-    for (let dx = -1; dx <= 2; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        if (dx >= 0 && dx <= 1 && dz === 0) continue;
-        this.blocks[this.index(cx + dx, cy + 1, cz + dz)] = woolBlock;
+    // Bed
+    const bedBlock = teamCfg.bed;
+    // Bed offset: 2 blocks at center, oriented based on facing
+    const bedOff1 = rotateOffset(0, 0, facing);
+    const bedOff2 = rotateOffset(1, 0, facing);
+    this.blocks[this.index(cx + bedOff1.dx, cy + 1, cz + bedOff1.dz)] = bedBlock;
+    this.blocks[this.index(cx + bedOff2.dx, cy + 1, cz + bedOff2.dz)] = bedBlock;
+    this.teams[team].bedPos = { x: cx, y: cy + 1, z: cz };
+
+    // Wool protection around bed
+    const woolBlock = teamCfg.wool;
+    for (let ddx = -1; ddx <= 2; ddx++) {
+      for (let ddz = -1; ddz <= 1; ddz++) {
+        if (ddx >= 0 && ddx <= 1 && ddz === 0) continue; // skip bed blocks themselves
+        const off = rotateOffset(ddx, ddz, facing);
+        this.blocks[this.index(cx + off.dx, cy + 1, cz + off.dz)] = woolBlock;
       }
     }
 
-    const spawnerPos = { x: cx - 3, y: cy + 1, z: cz };
-    if (team === 'red') this.redSpawnerPos = spawnerPos; else this.blueSpawnerPos = spawnerPos;
+    // Spawner (offset: -3, 0 from center toward away-from-center direction)
+    const spawnerOff = rotateOffset(-3, 0, facing);
+    const spawnerPos = { x: cx + spawnerOff.dx, y: cy + 1, z: cz + spawnerOff.dz };
+    this.teams[team].spawnerPos = spawnerPos;
     this.blocks[this.index(spawnerPos.x, cy, spawnerPos.z)] = BLOCK.IRON_BLOCK;
 
-    const merchantPos = { x: cx + 3, y: cy + 1, z: cz - 3 };
-    if (team === 'red') this.redMerchantPos = merchantPos; else this.blueMerchantPos = merchantPos;
+    // Merchant (offset: +3, -3)
+    const merchantOff = rotateOffset(3, -3, facing);
+    this.teams[team].merchantPos = { x: cx + merchantOff.dx, y: cy + 1, z: cz + merchantOff.dz };
 
-    const craftPos = { x: cx - 3, y: cy + 1, z: cz + 3 };
-    this.blocks[this.index(craftPos.x, cy, craftPos.z)] = BLOCK.CRAFTING_TABLE;
-    if (team === 'red') this.redCraftPos = { x: craftPos.x, y: cy + 1, z: craftPos.z };
-    else this.blueCraftPos = { x: craftPos.x, y: cy + 1, z: craftPos.z };
+    // Crafting table (offset: -3, +3)
+    const craftOff = rotateOffset(-3, 3, facing);
+    const craftX = cx + craftOff.dx, craftZ = cz + craftOff.dz;
+    this.blocks[this.index(craftX, cy, craftZ)] = BLOCK.CRAFTING_TABLE;
+    this.teams[team].craftPos = { x: craftX, y: cy + 1, z: craftZ };
 
-    const spawnPos = { x: cx, y: cy + 1.01, z: cz + 3 };
-    if (team === 'red') this.redSpawnPos = spawnPos; else this.blueSpawnPos = spawnPos;
+    // Spawn point (offset: 0, +3 — behind the bed, away from center)
+    const spawnOff = rotateOffset(0, 3, facing);
+    this.teams[team].spawnPos = { x: cx + spawnOff.dx, y: cy + 1.01, z: cz + spawnOff.dz };
 
-    this._generateTree(cx + size - 2, cy + 1, cz + size - 2);
-    this._generateTree(cx - size + 2, cy + 1, cz - size + 2);
+    // Trees (at edges of island)
+    const tree1 = rotateOffset(size - 2, size - 2, facing);
+    const tree2 = rotateOffset(-(size - 2), -(size - 2), facing);
+    this._generateTree(cx + tree1.dx, cy + 1, cz + tree1.dz);
+    this._generateTree(cx + tree2.dx, cy + 1, cz + tree2.dz);
   }
 
   _generateTree(x, y, z) {
@@ -188,7 +257,6 @@ export class VoxelWorld {
       { x: cx, y: cy + 1, z: cz + 4, type: 'gold' },
     ];
 
-    // Item pickup positions (arrows, food scattered around the island — no bows)
     this.centerItemPositions = [
       { x: cx - 3, y: cy + 1, z: cz - 6, item: 'arrow' },
       { x: cx + 3, y: cy + 1, z: cz + 6, item: 'arrow' },
@@ -224,94 +292,6 @@ export class VoxelWorld {
     ];
   }
 
-  // ==================== PRE-BUILT BRIDGES ====================
-  _generateBridges() {
-    // Three bridges connect each side island to the center island
-    // Bridge Z positions
-    const bridgeZs = [30, 25, 20]; // north, center, south
-    const types = ['gaps', 'walls', 'corridor']; // obstacle types
-
-    // Red side bridges: from red island edge (x≈23) to center island edge (x≈46)
-    // Blue side bridges: from center island edge (x≈74) to blue island edge (x≈97)
-    for (let i = 0; i < 3; i++) {
-      this._generateBridge(23, 46, bridgeZs[i], types[i], 'left');   // red → center
-      this._generateBridge(74, 97, bridgeZs[i], types[i], 'right');  // center → blue
-    }
-
-    // Store bridge Z coords for NPC pathfinding
-    this.bridgeZPositions = bridgeZs;
-  }
-
-  _generateBridge(startX, endX, z, type, side) {
-    // Height: side islands at y=15, center island at y=13
-    // Transition smoothly across the bridge
-    const length = endX - startX;
-    const isLeftSide = side === 'left'; // red→center goes high→low, center→blue goes low→high
-
-    for (let i = 0; i <= length; i++) {
-      const x = startX + i;
-      const progress = i / length; // 0 at start, 1 at end
-
-      // Height transition: smooth step from island height to center height
-      let y;
-      if (isLeftSide) {
-        // y=15 → y=13: descending toward center
-        y = Math.round(15 - progress * 2);
-      } else {
-        // y=13 → y=15: ascending toward blue island
-        y = Math.round(13 + progress * 2);
-      }
-
-      // Apply obstacle patterns
-      let placeBridge = true;
-
-      if (type === 'gaps') {
-        // Gap bridge: 1-block gaps every 5 blocks (skip first and last 3 blocks for safe entry/exit)
-        if (i > 3 && i < length - 3 && i % 5 === 3) {
-          placeBridge = false; // gap
-        }
-      }
-
-      if (placeBridge) {
-        this.blocks[this.index(x, y, z)] = BLOCK.COBBLESTONE;
-        // Support pillar underneath to make it look sturdy
-        if (y > 10) {
-          this.blocks[this.index(x, y - 1, z)] = BLOCK.STONE;
-        }
-      }
-
-      // Obstacle decorations
-      if (type === 'walls' && placeBridge) {
-        // Wall bridge: 1-high stone walls every 6 blocks
-        if (i > 2 && i < length - 2 && i % 6 === 3) {
-          this.blocks[this.index(x, y + 1, z)] = BLOCK.COBBLESTONE;
-        }
-      }
-
-      if (type === 'corridor' && placeBridge) {
-        // Corridor bridge: walls on both sides in segments
-        if (i > 4 && i < length - 4) {
-          const segment = Math.floor(i / 8);
-          if (segment % 2 === 0 && i % 8 < 5) {
-            // Side walls creating narrow corridor
-            this.blocks[this.index(x, y + 1, z - 1)] = BLOCK.COBBLESTONE;
-            this.blocks[this.index(x, y + 1, z + 1)] = BLOCK.COBBLESTONE;
-          }
-        }
-        // Place TNT traps at a few strategic spots
-        if (i === Math.floor(length * 0.3) || i === Math.floor(length * 0.7)) {
-          this.blocks[this.index(x, y + 1, z)] = BLOCK.TNT;
-        }
-      }
-    }
-
-    // Add railings/markers at bridge entry points
-    this.blocks[this.index(startX, Math.round(isLeftSide ? 15 : 13) + 1, z - 1)] = BLOCK.WOOD_LOG;
-    this.blocks[this.index(startX, Math.round(isLeftSide ? 15 : 13) + 1, z + 1)] = BLOCK.WOOD_LOG;
-    this.blocks[this.index(endX, Math.round(isLeftSide ? 13 : 15) + 1, z - 1)] = BLOCK.WOOD_LOG;
-    this.blocks[this.index(endX, Math.round(isLeftSide ? 13 : 15) + 1, z + 1)] = BLOCK.WOOD_LOG;
-  }
-
   // ==================== TEMP BRIDGES / TNT ====================
   placeTempBridge(x, y, z, dirX, dirZ, length = 12) {
     const placed = [];
@@ -341,8 +321,8 @@ export class VoxelWorld {
           if (dist <= radius) {
             const block = this.getBlock(x, y, z);
             if (block !== BLOCK.AIR && block !== BLOCK.BEDROCK) {
-              if (block === BLOCK.BED_RED) this.redBedAlive = false;
-              if (block === BLOCK.BED_BLUE) this.blueBedAlive = false;
+              const bedTeam = this._bedBlockToTeam(block);
+              if (bedTeam) this.teams[bedTeam].bedAlive = false;
               this.setBlock(x, y, z, BLOCK.AIR);
               destroyed.push({ x, y, z, block });
             }
@@ -370,7 +350,6 @@ export class VoxelWorld {
   rebuildMesh() {
     if (this.dirtyChunks.size === 0) return;
 
-    // Rebuild only dirty chunks (up to 4 per frame for smoothness)
     let rebuilt = 0;
     for (const key of this.dirtyChunks) {
       this._rebuildChunk(key);
@@ -383,7 +362,6 @@ export class VoxelWorld {
   _rebuildChunk(key) {
     const [cx, cy, cz] = key.split(',').map(Number);
 
-    // Remove old chunk mesh
     if (this.chunkMeshes[key]) {
       const oldGroup = this.chunkMeshes[key];
       oldGroup.traverse(child => {
@@ -394,7 +372,6 @@ export class VoxelWorld {
       delete this.chunkMeshes[key];
     }
 
-    // Build geometry for this chunk
     const geometries = {};
     const x0 = cx * CHUNK_SIZE, y0 = cy * CHUNK_SIZE, z0 = cz * CHUNK_SIZE;
     const x1 = Math.min(x0 + CHUNK_SIZE, this.width);

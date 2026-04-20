@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GRAVITY, JUMP_VELOCITY, WALK_SPEED, RUN_SPEED, PLAYER_HEIGHT, PLAYER_WIDTH,
          PLAYER_EYE_HEIGHT, ATTACK_RANGE, ATTACK_COOLDOWN, KNOCKBACK_FORCE, BLOCK,
-         TEAM_RED, ITEMS } from './constants.js';
+         TEAM_RED, TEAM_CONFIG, ITEMS } from './constants.js';
 
 export class Player {
   constructor(game) {
@@ -310,9 +310,7 @@ export class Player {
     }
     this.currency = { copper: 0, iron: 0, diamond: 0, gold: 0 };
 
-    if (this.team === TEAM_RED && this.world.redBedAlive) {
-      this.respawnTimer = 5;
-    } else if (this.team !== TEAM_RED && this.world.blueBedAlive) {
+    if (this.world.teams[this.team].bedAlive) {
       this.respawnTimer = 5;
     } else {
       this.eliminated = true;
@@ -325,7 +323,7 @@ export class Player {
     this.hp = this.maxHp;
     this.hunger = this.maxHunger;
     this.invincibleTimer = 2;
-    const spawn = this.team === TEAM_RED ? this.world.redSpawnPos : this.world.blueSpawnPos;
+    const spawn = this.world.teams[this.team].spawnPos;
     this.position.set(spawn.x, spawn.y, spawn.z);
     this.velocity.set(0, 0, 0);
   }
@@ -570,7 +568,7 @@ export class Player {
       if (!playerOverlap && this.world.getBlock(px, py, pz) === BLOCK.AIR) {
         let blockType = item.blockType;
         if (blockType === BLOCK.WOOL_WHITE) {
-          blockType = this.team === TEAM_RED ? BLOCK.WOOL_RED : BLOCK.WOOL_BLUE;
+          blockType = TEAM_CONFIG[this.team] ? TEAM_CONFIG[this.team].wool : BLOCK.WOOL_RED;
         }
         this.world.setBlock(px, py, pz, blockType);
         this.removeFromSlot(this.selectedSlot, 1);
