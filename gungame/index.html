@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gun Game · Red vs Blue</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; font-family: 'Arial', sans-serif; overflow: hidden; }
+#game-canvas { display: block; width: 100vw; height: 100vh; }
+
+/* Main menu */
+#main-menu {
+  position: fixed; inset: 0; z-index: 50;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  color: #fff; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 40px;
+}
+#main-menu h1 { font-size: 56px; margin-bottom: 6px; }
+#main-menu .sub { color: #94a3b8; margin-bottom: 24px; }
+#main-menu .panel {
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 12px; padding: 22px 28px; max-width: 720px;
+}
+#main-menu h2 { font-size: 18px; margin-bottom: 10px; color: #cbd5e1; }
+.weapon-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.weapon-row label {
+  display: flex; gap: 10px; align-items: center; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px; padding: 10px 12px;
+}
+.weapon-row label:has(input:checked) { background: rgba(96,165,250,0.18); border-color: #60a5fa; }
+.weapon-row input { accent-color: #60a5fa; }
+.weapon-row .stat { color: #94a3b8; font-size: 12px; margin-left: auto; }
+.controls-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 14px; color: #cbd5e1; }
+.controls-grid .key { background: rgba(255,255,255,0.12); padding: 2px 8px; border-radius: 4px; text-align: center; min-width: 44px; }
+#btn-start {
+  margin-top: 18px; padding: 14px 36px; font-size: 18px; font-weight: bold;
+  background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+}
+#btn-start:hover { background: #1d4ed8; }
+
+/* HUD */
+#hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; color: #fff; font-size: 14px; }
+#crosshair {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 22px; height: 22px;
+}
+#crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(255,255,255,0.85); }
+#crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-50%); }
+#crosshair::after { left: 50%; top: 0; height: 100%; width: 2px; transform: translateX(-50%); }
+
+/* Sniper scope */
+#scope {
+  position: absolute; inset: 0; display: none; pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 28%, rgba(0,0,0,0.92) 30%);
+}
+#scope::before, #scope::after {
+  content: ''; position: absolute; background: rgba(0,0,0,0.7);
+}
+#scope::before { left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); }
+#scope::after  { top: 50%; left: 0; right: 0; height: 2px; transform: translateY(-50%); }
+
+#hud-top-left, #hud-top-right {
+  position: absolute; top: 12px; padding: 8px 12px;
+  background: rgba(0,0,0,0.45); border-radius: 8px;
+}
+#hud-top-left { left: 12px; border-left: 3px solid #3b82f6; }
+#hud-top-right { right: 12px; border-right: 3px solid #ef4444; }
+#hud-top-left div, #hud-top-right div { line-height: 1.5; }
+
+#hud-bottom-left {
+  position: absolute; bottom: 14px; left: 14px; padding: 10px 14px;
+  background: rgba(0,0,0,0.55); border-radius: 8px; min-width: 240px;
+}
+#hud-gun-name { font-size: 16px; font-weight: bold; }
+#hud-ammo { color: #fcd34d; margin-top: 2px; }
+#hud-reload { color: #f87171; margin-top: 4px; }
+#hud-role { color: #a7f3d0; margin-top: 4px; font-size: 12px; }
+
+#hud-bottom-right {
+  position: absolute; bottom: 14px; right: 14px; padding: 10px 14px;
+  background: rgba(0,0,0,0.55); border-radius: 8px;
+}
+#hud-hp { font-size: 24px; font-weight: bold; }
+
+#hud-zone-hint {
+  position: absolute; left: 50%; bottom: 80px; transform: translateX(-50%);
+  background: rgba(0,80,0,0.55); padding: 6px 14px; border-radius: 6px;
+  display: none;
+}
+
+#click-to-play {
+  position: fixed; inset: 0; z-index: 65; display: none;
+  align-items: center; justify-content: center; flex-direction: column;
+  background: rgba(0,0,0,0.55); color: #fff; cursor: pointer;
+}
+#click-to-play .big { font-size: 32px; margin-bottom: 6px; }
+#click-to-play .small { font-size: 14px; color: #cbd5e1; }
+
+#respawn-banner {
+  position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%);
+  font-size: 36px; color: #fca5a5; text-shadow: 0 0 12px #000;
+  display: none;
+}
+
+/* Weapon picker (in-base) */
+#weapon-picker {
+  position: fixed; inset: 0; z-index: 60; display: none;
+  align-items: center; justify-content: center; background: rgba(0,0,0,0.7); color: #fff;
+}
+#weapon-picker .picker {
+  background: #0f172a; border: 1px solid rgba(255,255,255,0.2); border-radius: 12px;
+  padding: 22px; min-width: 360px;
+}
+#weapon-picker h2 { margin-bottom: 12px; }
+#weapon-picker button[data-gun] {
+  display: block; width: 100%; margin: 6px 0; padding: 12px;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px; color: #fff; text-align: left; cursor: pointer; font-size: 15px;
+}
+#weapon-picker button[data-gun]:hover { background: rgba(255,255,255,0.18); }
+#weapon-picker-close {
+  margin-top: 12px; padding: 8px 18px; background: #ef4444; color: #fff;
+  border: none; border-radius: 6px; cursor: pointer;
+}
+
+/* End screen */
+#end-screen {
+  position: fixed; inset: 0; z-index: 70; display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.75); color: #fff;
+}
+#end-screen h1 { font-size: 64px; margin-bottom: 18px; }
+#end-screen button {
+  padding: 12px 28px; font-size: 18px; background: #2563eb; color: #fff;
+  border: none; border-radius: 8px; cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game-canvas"></canvas>
+
+<div id="main-menu">
+  <h1>Gun Game</h1>
+  <p class="sub">Red vs Blue · 5 vs 5 · two houses · destroy them all</p>
+  <div class="panel">
+    <h2>Pick your main weapon (you also carry a Pistol)</h2>
+    <div class="weapon-row">
+      <label><input type="radio" name="start-weapon" value="2" checked> Rifle <span class="stat">35 dmg · 4-mag · 2 reserves</span></label>
+      <label><input type="radio" name="start-weapon" value="1"> SMG (Medic) <span class="stat">20 dmg · 8-mag · 1 reserve</span></label>
+      <label><input type="radio" name="start-weapon" value="3"> Sniper <span class="stat">80 dmg · 1-mag · 5 reserves</span></label>
+      <label style="opacity:.7"><input type="radio" name="start-weapon" value="0"> Pistol-only <span class="stat">no main</span></label>
+    </div>
+    <h2>Controls</h2>
+    <div class="controls-grid">
+      <span class="key">WASD</span><span>Move</span>
+      <span class="key">Space</span><span>Jump (climb on crates / cars / ramps / roofs)</span>
+      <span class="key">Shift</span><span>Sprint</span>
+      <span class="key">L-click</span><span>Shoot · headshots do 2× damage</span>
+      <span class="key">R-click</span><span>Aim down sights (zoom)</span>
+      <span class="key">1 / 2</span><span>Switch Pistol / Main weapon</span>
+      <span class="key">R</span><span>Reload</span>
+      <span class="key">B</span><span>Change weapon (only inside Blue Base)</span>
+      <span class="key">🟢 zone</span><span>Stand on a green pad to refill ammo</span>
+    </div>
+    <h2 style="margin-top:14px">Roles on the field</h2>
+    <div style="font-size:13px;color:#cbd5e1;line-height:1.6">
+      ➕ Medic (red cross) carries the SMG — heals nearby allies and revives downed teammates within 15 s.<br/>
+      🎯 Sniper (crosshair) carries the Sniper.<br/>
+      🔫 The other 3 soldiers per team carry Rifles.
+    </div>
+  </div>
+  <button id="btn-start">Start Match</button>
+</div>
+
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="scope"></div>
+  <div id="hud-top-left">
+    <div id="hud-blue-alive">Blue: 5 / 5</div>
+    <div id="hud-blue-house">🏠 500/500</div>
+  </div>
+  <div id="hud-top-right">
+    <div id="hud-red-alive">Red: 5 / 5</div>
+    <div id="hud-red-house">🏠 500/500</div>
+  </div>
+  <div id="hud-bottom-left">
+    <div id="hud-gun-name">Rifle</div>
+    <div id="hud-ammo">4 / 4</div>
+    <div id="hud-reload" style="display:none"></div>
+    <div id="hud-role">Role: rifle</div>
+  </div>
+  <div id="hud-bottom-right">
+    <div id="hud-hp">HP 100</div>
+  </div>
+  <div id="hud-zone-hint"></div>
+  <div id="respawn-banner">You died — respawning…</div>
+</div>
+
+<div id="click-to-play">
+  <div class="big">Click to play</div>
+  <div class="small">(your mouse will be locked for aiming — press Esc to release)</div>
+</div>
+
+<div id="weapon-picker">
+  <div class="picker">
+    <h2>Choose Main Weapon</h2>
+    <button data-gun="2">🔫 Rifle — 35 dmg · 4 / mag · 2 reserves</button>
+    <button data-gun="1">💉 SMG (Medic) — 20 dmg · 8 / mag · 1 reserve</button>
+    <button data-gun="3">🎯 Sniper — 80 dmg · 1 / mag · 5 reserves</button>
+    <button id="weapon-picker-close">Cancel</button>
+  </div>
+</div>
+
+<div id="end-screen">
+  <h1 id="end-title">Blue Wins!</h1>
+  <button onclick="location.reload()">Play Again</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
