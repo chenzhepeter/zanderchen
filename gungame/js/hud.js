@@ -10,14 +10,21 @@ export class HUD {
     this.role = document.getElementById('hud-role');
     this.blueAlive = document.getElementById('hud-blue-alive');
     this.redAlive = document.getElementById('hud-red-alive');
-    this.blueHouseHp = document.getElementById('hud-blue-house');
-    this.redHouseHp = document.getElementById('hud-red-house');
+    this.blueKd = document.getElementById('hud-blue-kd');
+    this.redKd = document.getElementById('hud-red-kd');
     this.endScreen = document.getElementById('end-screen');
     this.endTitle = document.getElementById('end-title');
     this.zoneHint = document.getElementById('hud-zone-hint');
     this.crosshair = document.getElementById('crosshair');
     this.scope = document.getElementById('scope');
     this.respawnBanner = document.getElementById('respawn-banner');
+
+    // Create flag status overlay
+    const flagDiv = document.createElement('div');
+    flagDiv.id = 'hud-flag';
+    flagDiv.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:8px;color:#fff;font-size:14px;display:none;pointer-events:none;';
+    document.getElementById('hud').appendChild(flagDiv);
+    this.flagStatus = flagDiv;
   }
 
   update(game) {
@@ -40,8 +47,36 @@ export class HUD {
     const redAlive = game.bots.filter(b => b.team === 'red' && b.alive).length;
     this.blueAlive.textContent = `Blue: ${blueAlive} / 5`;
     this.redAlive.textContent = `Red: ${redAlive} / 5`;
-    this.blueHouseHp.textContent = `🏠 ${game.world.houses.blue.hp}/500`;
-    this.redHouseHp.textContent = `🏠 ${game.world.houses.red.hp}/500`;
+
+    // K/D stats
+    let blueKills = p.kills, blueDeaths = p.deaths;
+    let redKills = 0, redDeaths = 0;
+    for (const b of game.bots) {
+      if (b.team === 'blue') { blueKills += b.kills; blueDeaths += b.deaths; }
+      else { redKills += b.kills; redDeaths += b.deaths; }
+    }
+    this.blueKd.textContent = `K/D: ${blueKills} / ${blueDeaths}`;
+    this.redKd.textContent = `K/D: ${redKills} / ${redDeaths}`;
+
+    // Flag status
+    const fs = game.flagSystem;
+    if (fs.carrier === p) {
+      this.flagStatus.style.display = 'block';
+      this.flagStatus.textContent = `🚩 Carrying ${fs.carriedEnemyTeam === 'red' ? 'Red' : 'Blue'} Flag — return to base!`;
+      this.flagStatus.style.background = 'rgba(180,30,30,0.7)';
+    } else if (fs.carrier) {
+      this.flagStatus.style.display = 'block';
+      const ct = fs.carrier.team === 'blue' ? 'Blue' : 'Red';
+      this.flagStatus.textContent = `🚩 ${ct} team has your flag!`;
+      this.flagStatus.style.background = 'rgba(180,30,30,0.7)';
+    } else if (fs.droppedPos) {
+      this.flagStatus.style.display = 'block';
+      const dt = fs.droppedTeam === 'red' ? 'Red' : 'Blue';
+      this.flagStatus.textContent = `🚩 ${dt} Flag dropped on the field!`;
+      this.flagStatus.style.background = 'rgba(100,80,0,0.7)';
+    } else {
+      this.flagStatus.style.display = 'none';
+    }
 
     // Zone hint
     let inZone = null;

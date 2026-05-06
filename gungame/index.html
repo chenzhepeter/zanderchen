@@ -149,15 +149,15 @@ body { background: #000; font-family: 'Arial', sans-serif; overflow: hidden; }
   <div class="panel">
     <h2>Pick your main weapon (you also carry a Pistol)</h2>
     <div class="weapon-row">
-      <label><input type="radio" name="start-weapon" value="2" checked> Rifle <span class="stat">35 dmg · 4-mag · 2 reserves</span></label>
-      <label><input type="radio" name="start-weapon" value="1"> SMG (Medic) <span class="stat">20 dmg · 8-mag · 1 reserve</span></label>
-      <label><input type="radio" name="start-weapon" value="3"> Sniper <span class="stat">80 dmg · 1-mag · 5 reserves</span></label>
+      <label><input type="radio" name="start-weapon" value="2" checked> Rifle <span class="stat">35 dmg · 15-mag · 3 reserves</span></label>
+      <label><input type="radio" name="start-weapon" value="1"> SMG (Medic) <span class="stat">20 dmg · 10-mag · 3 reserves</span></label>
+      <label><input type="radio" name="start-weapon" value="3"> Sniper <span class="stat">80 dmg · 5-mag · 3 reserves</span></label>
       <label style="opacity:.7"><input type="radio" name="start-weapon" value="0"> Pistol-only <span class="stat">no main</span></label>
     </div>
     <h2>Controls</h2>
     <div class="controls-grid">
       <span class="key">WASD</span><span>Move</span>
-      <span class="key">Space</span><span>Jump (climb on crates / cars / ramps / roofs)</span>
+      <span class="key">Space</span><span>Jump (climb on crates / cars / ramps)</span>
       <span class="key">Shift</span><span>Sprint</span>
       <span class="key">L-click</span><span>Shoot · headshots do 2× damage</span>
       <span class="key">R-click</span><span>Aim down sights (zoom)</span>
@@ -165,9 +165,13 @@ body { background: #000; font-family: 'Arial', sans-serif; overflow: hidden; }
       <span class="key">R</span><span>Reload</span>
       <span class="key">B</span><span>Change weapon (only inside Blue Base)</span>
       <span class="key">🟢 zone</span><span>Stand on a green pad to refill ammo</span>
+      <span class="key">W/S</span><span>Climb up/down ladders on houses</span>
     </div>
-    <h2 style="margin-top:14px">Roles on the field</h2>
+    <h2 style="margin-top:14px">Objective: Capture the Flag</h2>
     <div style="font-size:13px;color:#cbd5e1;line-height:1.6">
+      🚩 Climb the ladder to the enemy roof and grab their flag.<br/>
+      🏠 Bring it back to your own base to win!<br/>
+      💀 If you die while carrying, the flag drops where you fell.<br/>
       ➕ Medic (red cross) carries the SMG — heals nearby allies and revives downed teammates within 15 s.<br/>
       🎯 Sniper (crosshair) carries the Sniper.<br/>
       🔫 The other 3 soldiers per team carry Rifles.
@@ -181,11 +185,11 @@ body { background: #000; font-family: 'Arial', sans-serif; overflow: hidden; }
   <div id="scope"></div>
   <div id="hud-top-left">
     <div id="hud-blue-alive">Blue: 5 / 5</div>
-    <div id="hud-blue-house">🏠 500/500</div>
+    <div id="hud-blue-kd" style="font-size:12px;color:#94a3b8;margin-top:2px">K/D: 0 / 0</div>
   </div>
   <div id="hud-top-right">
     <div id="hud-red-alive">Red: 5 / 5</div>
-    <div id="hud-red-house">🏠 500/500</div>
+    <div id="hud-red-kd" style="font-size:12px;color:#94a3b8;margin-top:2px">K/D: 0 / 0</div>
   </div>
   <div id="hud-bottom-left">
     <div id="hud-gun-name">Rifle</div>
@@ -208,9 +212,9 @@ body { background: #000; font-family: 'Arial', sans-serif; overflow: hidden; }
 <div id="weapon-picker">
   <div class="picker">
     <h2>Choose Main Weapon</h2>
-    <button data-gun="2">🔫 Rifle — 35 dmg · 4 / mag · 2 reserves</button>
-    <button data-gun="1">💉 SMG (Medic) — 20 dmg · 8 / mag · 1 reserve</button>
-    <button data-gun="3">🎯 Sniper — 80 dmg · 1 / mag · 5 reserves</button>
+    <button data-gun="2">🔫 Rifle — 35 dmg · 15 / mag · 3 reserves</button>
+    <button data-gun="1">💉 SMG (Medic) — 20 dmg · 10 / mag · 3 reserves</button>
+    <button data-gun="3">🎯 Sniper — 80 dmg · 5 / mag · 3 reserves</button>
     <button id="weapon-picker-close">Cancel</button>
   </div>
 </div>
