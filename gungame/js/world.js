@@ -24,23 +24,18 @@ export function buildWorld(scene) {
     [TEAM_RED]:  makeHouse(scene, TEAM_RED),
   };
 
-  // Solids: world geometry the player can stand on AND collide with.
+  // Solids
   const solids = [];
-  // Houses are climbable (roofs reachable via ramps / ladders)
   for (const team of [TEAM_BLUE, TEAM_RED]) {
     for (const w of houses[team].walls) solids.push({ mesh: w.mesh, box: w.box, climbable: true });
     solids.push({ mesh: houses[team].roof, box: new THREE.Box3().setFromObject(houses[team].roof), climbable: true });
-    // Ladders
-    for (const lad of houses[team].ladders) {
-      solids.push({ mesh: lad.mesh, box: lad.box, climbable: false, isLadder: true, houseTeam: team });
-    }
   }
 
   // Cover crates (climbable)
   const crateMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
   const crates = [
     [-8, 0, 2], [8, 0, 2], [-4, 8, 2], [4, -8, 2], [-12, -4, 2], [12, 4, 2],
-    [0, 18, 1.5], [0, -18, 1.5], [-18, 12, 2.5], [18, -12, 2.5],
+    [3, 18, 1.5], [-3, -18, 1.5], [-18, 12, 2.5], [18, -12, 2.5],
     [-25, 0, 2], [25, 0, 2], [-32, 22, 2], [32, -22, 2], [10, 30, 2],
     [-10, -30, 2], [22, 40, 2], [-22, -40, 2], [40, 8, 2], [-40, -8, 2],
   ];
@@ -86,8 +81,8 @@ export function buildWorld(scene) {
       carGroup.add(wh);
     }
     scene.add(carGroup);
-    solids.push({ mesh: chassis, box: new THREE.Box3().setFromObject(chassis), climbable: true });
-    solids.push({ mesh: cabin, box: new THREE.Box3().setFromObject(cabin), climbable: true });
+    solids.push({ mesh: chassis, box: new THREE.Box3().setFromObject(chassis), climbable: true, isCar: true });
+    solids.push({ mesh: cabin, box: new THREE.Box3().setFromObject(cabin), climbable: true, isCar: true });
   }
 
   // Standalone wheel obstacles
@@ -100,7 +95,7 @@ export function buildWorld(scene) {
     solids.push({ mesh: wh, box: new THREE.Box3().setFromObject(wh), climbable: true });
   }
 
-  // Neutral buildings (shacks)
+  // Neutral buildings (shacks) with doors and windows
   const shackPositions = [
     { x: -22, z: 6,   color: 0x8b8b6b, w: 6,  h: 3.5, d: 5 },
     { x: 22,  z: -6,  color: 0x6b8b8b, w: 6,  h: 3.5, d: 5 },
@@ -108,23 +103,13 @@ export function buildWorld(scene) {
     { x: 34,  z: 12,  color: 0x6ba889, w: 7,  h: 4.0, d: 6 },
     { x: -14, z: 28,  color: 0x896ba8, w: 5,  h: 3.0, d: 5 },
     { x: 14,  z: -28, color: 0xa86b89, w: 5,  h: 3.0, d: 5 },
-    { x: 0,   z: 22,  color: 0x4f46e5, w: 9,  h: 4.5, d: 7 },
-    { x: 0,   z: -22, color: 0xb91c1c, w: 9,  h: 4.5, d: 7 },
+    { x: 0,   z: 24,  color: 0x4f46e5, w: 9,  h: 4.5, d: 7 },
+    { x: 0,   z: -24, color: 0xb91c1c, w: 9,  h: 4.5, d: 7 },
     { x: -42, z: 0,   color: 0x71717a, w: 8,  h: 4.0, d: 6 },
     { x: 42,  z: 0,   color: 0x71717a, w: 8,  h: 4.0, d: 6 },
   ];
   for (const sp of shackPositions) {
-    const sw = sp.w, sh = sp.h, sd = sp.d;
-    const wallMat = new THREE.MeshLambertMaterial({ color: sp.color });
-    const back  = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, 0.3), wallMat); back.position.set(sp.x, sh/2, sp.z + sd/2); scene.add(back);
-    const left  = new THREE.Mesh(new THREE.BoxGeometry(0.3, sh, sd), wallMat); left.position.set(sp.x - sw/2, sh/2, sp.z); scene.add(left);
-    const right = new THREE.Mesh(new THREE.BoxGeometry(0.3, sh, sd), wallMat); right.position.set(sp.x + sw/2, sh/2, sp.z); scene.add(right);
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(sw, 1, 0.3), wallMat); lintel.position.set(sp.x, sh - 0.5, sp.z - sd/2); scene.add(lintel);
-    const roof  = new THREE.Mesh(new THREE.BoxGeometry(sw + 0.6, 0.3, sd + 0.6), new THREE.MeshLambertMaterial({ color: 0x333333 }));
-    roof.position.set(sp.x, sh + 0.15, sp.z); scene.add(roof);
-    for (const m of [back, left, right, lintel, roof]) {
-      solids.push({ mesh: m, box: new THREE.Box3().setFromObject(m), climbable: true });
-    }
+    makeShack(scene, sp, solids);
   }
 
   // Uneven terrain: a few low hills/ramps
@@ -146,22 +131,23 @@ export function buildWorld(scene) {
     solids.push({ mesh: m, box: new THREE.Box3().setFromObject(m), climbable: true });
   }
 
-  // Staircases from ground up to the houses' roofs (back side of each house)
-  const stepMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+  // Jump platforms to reach house roofs (parkour style)
+  const platMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
   for (const team of [TEAM_BLUE, TEAM_RED]) {
     const hp = HOUSE_POS[team];
     const sign = team === TEAM_BLUE ? 1 : -1;
     const baseZ = hp.z + sign * (HOUSE_SIZE.d / 2 + 0.5);
-    const steps = 5;
-    const stepDepth = 1.6;
-    const stepHeight = (HOUSE_SIZE.h + 0.5) / steps;
-    const stepWidth = 4;
-    for (let i = 0; i < steps; i++) {
-      const top = (i + 1) * stepHeight;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(stepWidth, top, stepDepth), stepMat);
-      m.position.set(hp.x + 6, top / 2, baseZ + sign * (i * stepDepth));
-      scene.add(m);
-      solids.push({ mesh: m, box: new THREE.Box3().setFromObject(m), climbable: true });
+    // Two columns of platforms on each side of the back of the house
+    for (const sideOffset of [-6, 6]) {
+      const platX = hp.x + sideOffset;
+      const heights = [1.5, 3.5, 5.5, 7.3];
+      const zOffsets = [2.0, 0.5, -1.0, -2.5];
+      for (let i = 0; i < heights.length; i++) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.35, 1.0), platMat);
+        p.position.set(platX, heights[i], baseZ + sign * zOffsets[i]);
+        scene.add(p);
+        solids.push({ mesh: p, box: new THREE.Box3().setFromObject(p), climbable: true });
+      }
     }
   }
 
@@ -187,6 +173,87 @@ export function buildWorld(scene) {
   return { houses, solids, ground, restockMarkers };
 }
 
+function makeShack(scene, sp, solids) {
+  const sw = sp.w, sh = sp.h, sd = sp.d;
+  const wallMat = new THREE.MeshLambertMaterial({ color: sp.color });
+  const frameMat = new THREE.MeshLambertMaterial({ color: 0x5a3a1a });
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
+
+  // Front has a door opening
+  const frontZ = sp.z - sd / 2;
+  const doorW = 2.5, doorH = 2.4;
+  const sideW = (sw - doorW) / 2;
+  const fl = new THREE.Mesh(new THREE.BoxGeometry(sideW, sh, 0.3), wallMat);
+  fl.position.set(sp.x - (doorW / 2 + sideW / 2), sh / 2, frontZ);
+  scene.add(fl); solids.push({ mesh: fl, box: new THREE.Box3().setFromObject(fl), climbable: true });
+  const fr = new THREE.Mesh(new THREE.BoxGeometry(sideW, sh, 0.3), wallMat);
+  fr.position.set(sp.x + (doorW / 2 + sideW / 2), sh / 2, frontZ);
+  scene.add(fr); solids.push({ mesh: fr, box: new THREE.Box3().setFromObject(fr), climbable: true });
+  const lintelH = sh - doorH;
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW, lintelH, 0.3), wallMat);
+  lintel.position.set(sp.x, doorH + lintelH / 2, frontZ);
+  scene.add(lintel); solids.push({ mesh: lintel, box: new THREE.Box3().setFromObject(lintel), climbable: true });
+
+  // Door frame visuals
+  const frameThick = 0.15;
+  const dfLeft = new THREE.Mesh(new THREE.BoxGeometry(frameThick, doorH, frameThick), frameMat);
+  dfLeft.position.set(sp.x - doorW / 2, doorH / 2, frontZ); scene.add(dfLeft);
+  const dfRight = new THREE.Mesh(new THREE.BoxGeometry(frameThick, doorH, frameThick), frameMat);
+  dfRight.position.set(sp.x + doorW / 2, doorH / 2, frontZ); scene.add(dfRight);
+  const dfTop = new THREE.Mesh(new THREE.BoxGeometry(doorW + frameThick * 2, frameThick, frameThick), frameMat);
+  dfTop.position.set(sp.x, doorH, frontZ); scene.add(dfTop);
+
+  // Back wall (solid)
+  const back = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, 0.3), wallMat);
+  back.position.set(sp.x, sh / 2, sp.z + sd / 2);
+  scene.add(back); solids.push({ mesh: back, box: new THREE.Box3().setFromObject(back), climbable: true });
+
+  // Side walls with windows
+  const winW = 1.8, winH = 1.2, winBottom = 1.0;
+  for (const side of ['left', 'right']) {
+    const sideX = side === 'left' ? sp.x - sw / 2 : sp.x + sw / 2;
+    const wallThick = 0.3;
+    // Bottom solid strip
+    const botStrip = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winBottom, sd), wallMat);
+    botStrip.position.set(sideX, winBottom / 2, sp.z);
+    scene.add(botStrip); solids.push({ mesh: botStrip, box: new THREE.Box3().setFromObject(botStrip), climbable: true });
+    // Top solid strip
+    const topStripH = sh - (winBottom + winH);
+    const topStrip = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topStripH, sd), wallMat);
+    topStrip.position.set(sideX, winBottom + winH + topStripH / 2, sp.z);
+    scene.add(topStrip); solids.push({ mesh: topStrip, box: new THREE.Box3().setFromObject(topStrip), climbable: true });
+
+    // Window edges and center pillar
+    const pillarW = 0.8;
+    const edgeSegD = (sd - winW * 2 - pillarW) / 2;
+    if (edgeSegD > 0) {
+      const leftSeg = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, edgeSegD), wallMat);
+      leftSeg.position.set(sideX, winBottom + winH / 2, sp.z - sd / 2 + edgeSegD / 2);
+      scene.add(leftSeg); solids.push({ mesh: leftSeg, box: new THREE.Box3().setFromObject(leftSeg), climbable: true });
+
+      const rightSeg = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, edgeSegD), wallMat);
+      rightSeg.position.set(sideX, winBottom + winH / 2, sp.z + sd / 2 - edgeSegD / 2);
+      scene.add(rightSeg); solids.push({ mesh: rightSeg, box: new THREE.Box3().setFromObject(rightSeg), climbable: true });
+    }
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, pillarW), wallMat);
+    pillar.position.set(sideX, winBottom + winH / 2, sp.z);
+    scene.add(pillar); solids.push({ mesh: pillar, box: new THREE.Box3().setFromObject(pillar), climbable: true });
+
+    // Glass panes
+    for (const offset of [-winW / 2 - pillarW / 2, winW / 2 + pillarW / 2]) {
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.05, winH, winW), glassMat);
+      glass.position.set(sideX, winBottom + winH / 2, sp.z + offset);
+      scene.add(glass);
+    }
+  }
+
+  // Roof
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(sw + 0.6, 0.3, sd + 0.6), new THREE.MeshLambertMaterial({ color: 0x333333 }));
+  roof.position.set(sp.x, sh + 0.15, sp.z);
+  scene.add(roof);
+  solids.push({ mesh: roof, box: new THREE.Box3().setFromObject(roof), climbable: true });
+}
+
 function makeHouse(scene, team) {
   const pos = HOUSE_POS[team];
   const color = TEAM_COLOR[team];
@@ -201,7 +268,6 @@ function makeHouse(scene, team) {
   const t = 0.5;
   const walls = [];
 
-  // Helper to add wall and track
   function addWall(mesh) {
     group.add(mesh);
     walls.push({ mesh, box: new THREE.Box3().setFromObject(mesh) });
@@ -216,22 +282,19 @@ function makeHouse(scene, team) {
   // Front wall with door opening
   const frontZ = team === TEAM_BLUE ? -d / 2 : d / 2;
   const doorW = 4, doorH = 3.2;
-  const sideW = (w - doorW) / 2; // 7
-  // Front left
+  const sideW = (w - doorW) / 2;
   const fl = new THREE.Mesh(new THREE.BoxGeometry(sideW, h, t), wallMat);
   fl.position.set(-(doorW / 2 + sideW / 2), h / 2, frontZ);
   addWall(fl);
-  // Front right
   const fr = new THREE.Mesh(new THREE.BoxGeometry(sideW, h, t), wallMat);
   fr.position.set((doorW / 2 + sideW / 2), h / 2, frontZ);
   addWall(fr);
-  // Lintel above door
   const lintelH = h - doorH;
   const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW, lintelH, t), wallMat);
   lintel.position.set(0, doorH + lintelH / 2, frontZ);
   addWall(lintel);
 
-  // Door frame visuals (thin boxes around the door)
+  // Door frame visuals
   const frameThick = 0.15;
   const dfLeft = new THREE.Mesh(new THREE.BoxGeometry(frameThick, doorH, frameThick), frameMat);
   dfLeft.position.set(-doorW / 2, doorH / 2, frontZ);
@@ -243,49 +306,39 @@ function makeHouse(scene, team) {
   dfTop.position.set(0, doorH, frontZ);
   group.add(dfTop);
 
-  // Side walls with windows
-  // Window specs: 2 windows per side, w=3, h=2, bottom at y=2
-  const winW = 3, winH = 2, winBottom = 2;
-  const winZCenters = [-3.5, 3.5]; // centered within d=14
+  // Side walls with windows — height aligned with eye level (~1.6)
+  const winW = 3, winH = 1.6, winBottom = 1.2;
+  const winZCenters = [-3.5, 3.5];
 
   for (const side of ['left', 'right']) {
     const sideX = side === 'left' ? -w / 2 : w / 2;
     const wallThick = t;
-    // Build side wall in segments to create window openings
-    // Bottom solid strip (y: 0 to winBottom)
     const botStrip = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winBottom, d), wallMat);
     botStrip.position.set(sideX, winBottom / 2, 0);
     addWall(botStrip);
-    // Top solid strip (y: winBottom+winH to h)
     const topStripH = h - (winBottom + winH);
     const topStrip = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topStripH, d), wallMat);
     topStrip.position.set(sideX, winBottom + winH + topStripH / 2, 0);
     addWall(topStrip);
 
-    // Between windows and edges
-    const edgeZ = [-d / 2, -1, 1, d / 2]; // boundaries for segments
+    const edgeZ = [-d / 2, -1, 1, d / 2];
     for (let i = 0; i < edgeZ.length - 1; i++) {
       const zStart = edgeZ[i], zEnd = edgeZ[i + 1];
       const segD = zEnd - zStart;
       const segZ = (zStart + zEnd) / 2;
-      // Skip the window gaps (between -1 and 1 is the center pillar)
-      if (Math.abs(segZ) < 0.1) continue; // center pillar handled separately
+      if (Math.abs(segZ) < 0.1) continue;
       const seg = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, segD), wallMat);
       seg.position.set(sideX, winBottom + winH / 2, segZ);
       addWall(seg);
     }
-    // Center pillar between windows
     const pillar = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, 2), wallMat);
     pillar.position.set(sideX, winBottom + winH / 2, 0);
     addWall(pillar);
 
-    // Window frames + glass
     for (const wz of winZCenters) {
-      // Glass pane
       const glass = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.05, winH, winW), glassMat);
       glass.position.set(sideX, winBottom + winH / 2, wz);
       group.add(glass);
-      // Frame
       const wfTop = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.1, winW + 0.2), frameMat);
       wfTop.position.set(sideX, winBottom + winH, wz); group.add(wfTop);
       const wfBot = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.1, winW + 0.2), frameMat);
@@ -302,47 +355,16 @@ function makeHouse(scene, team) {
   roof.position.set(0, h + 0.25, 0);
   group.add(roof);
 
-  // Flag pole on roof (flag mesh created by Game)
+  // Flag pole on roof
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 5), new THREE.MeshLambertMaterial({ color: 0x222222 }));
   pole.position.set(0, h + 2.5 + 0.5, 0);
   group.add(pole);
-
-  // Ladders on left and right sides of the house
-  const ladders = [];
-  const ladderMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
-  const ladderHeight = h + 0.5; // to roof top
-  for (const side of ['left', 'right']) {
-    const lx = side === 'left' ? -(w / 2 + 0.6) : (w / 2 + 0.6);
-    const ladderGroup = new THREE.Group();
-    ladderGroup.position.set(lx, 0, 0);
-    // Two rails
-    const railGeom = new THREE.BoxGeometry(0.08, ladderHeight, 0.08);
-    const railL = new THREE.Mesh(railGeom, ladderMat);
-    railL.position.set(0, ladderHeight / 2, -0.35);
-    ladderGroup.add(railL);
-    const railR = new THREE.Mesh(railGeom, ladderMat);
-    railR.position.set(0, ladderHeight / 2, 0.35);
-    ladderGroup.add(railR);
-    // Rungs every 0.6m
-    const rungCount = Math.floor(ladderHeight / 0.6);
-    for (let i = 0; i <= rungCount; i++) {
-      const rung = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.7), ladderMat);
-      rung.position.set(0, i * 0.6, 0);
-      ladderGroup.add(rung);
-    }
-    group.add(ladderGroup);
-    // Ladder collision box (wider so bots can find it easily)
-    const ladMesh = new THREE.Mesh(new THREE.BoxGeometry(2.0, ladderHeight, 2.0), new THREE.MeshBasicMaterial({ visible: false }));
-    ladMesh.position.set(lx, ladderHeight / 2, 0);
-    group.add(ladMesh);
-    ladders.push({ mesh: ladMesh, box: new THREE.Box3().setFromObject(ladMesh) });
-  }
 
   scene.add(group);
 
   const house = {
     team, group, walls, roof, pos, pole,
-    ladders,
+    ladders: [],
     hp: HOUSE_HP, maxHp: HOUSE_HP,
     onDestroyed() { group.visible = false; },
     damage(d) {

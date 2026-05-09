@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { PLAYER_HP, GUNS, TEAM_BLUE, HEADSHOT_MULT, RESTOCK_ZONES, speedMultFromHp, ROLE_RIFLE, ROLE_GUN, PLAYER_RESPAWN_TIME, HOUSE_POS, LADDER_SPEED, FALL_DAMAGE, FALL_DAMAGE_THRESHOLD } from './constants.js';
+import { PLAYER_HP, GUNS, TEAM_BLUE, HEADSHOT_MULT, RESTOCK_ZONES, speedMultFromHp, ROLE_RIFLE, ROLE_GUN, PLAYER_RESPAWN_TIME, HOUSE_POS, FALL_DAMAGE, FALL_DAMAGE_THRESHOLD, ROLE_MEDIC, REVIVE_TIME, REVIVE_RANGE, HEAL_PER_SEC, HEAL_RANGE } from './constants.js';
 import { makeGunMesh, makeMuzzleFlash, makeShooter, tickShooter, canShoot, startReload, consumeShot, switchSlot, activeGun, activeGunId, restock, setMainGun } from './guns.js';
 
-const EYE_HEIGHT = 1.6;
+const EYE_HEIGHT_STAND = 1.6;
+const EYE_HEIGHT_PRONE = 0.5;
 const MOVE_SPEED = 6;
 const SPRINT_MULT = 1.6;
-const JUMP_V = 7.0;
+const JUMP_V = 10.0;
 const GRAVITY = 22;
 const DEFAULT_FOV = 75;
 
@@ -19,7 +20,7 @@ export class Player {
     this.hp = PLAYER_HP;
     this.alive = true;
     this.respawnIn = 0;
-    this.spawnPos = new THREE.Vector3(HOUSE_POS[TEAM_BLUE].x, EYE_HEIGHT, HOUSE_POS[TEAM_BLUE].z);
+    this.spawnPos = new THREE.Vector3(HOUSE_POS[TEAM_BLUE].x, EYE_HEIGHT_STAND, HOUSE_POS[TEAM_BLUE].z);
 
     this.position = this.spawnPos.clone();
     this.velocity = new THREE.Vector3();
@@ -46,10 +47,16 @@ export class Player {
     this.kills = 0;
     this.deaths = 0;
 
-    // Ladder / fall damage
-    this.onLadder = false;
-    this._ladderHouseTeam = null;
+    // Prone
+    this.isProne = false;
+    this.eyeHeight = EYE_HEIGHT_STAND;
+
+    // Fall damage
     this._prevGroundY = null;
+
+    // Medic revive
+    this._reviveTarget = null;
+    this._reviveProgress = 0;
   }
 
   setRole(role) {
@@ -97,12 +104,39 @@ export class Player {
       if (e.code === 'KeyR') startReload(this.shooter);
       if (e.code === 'Digit1') { switchSlot(this.shooter, 0); this.equipCurrentMesh(); }
       if (e.code === 'Digit2') { switchSlot(this.shooter, 1); this.equipCurrentMesh(); }
+      if (e.code === 'KeyZ') this.toggleProne();
     });
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.dom.addEventListener('contextmenu', e => e.preventDefault());
   }
 
   requestPointerLock() { this.dom.requestPointerLock?.(); }
+
+  toggleProne() {
+    if (!this.alive) return;
+    if (this.isProne) {
+      // Try stand up — check ceiling
+      const solids = this.world?.solids;
+      if (solids) {
+        const headY = this.position.y + EYE_HEIGHT_STAND + 0.2;
+        const r = 0.4;
+        for (const s of solids) {
+          const b = s.box;
+          if (b.max.y < this.position.y + 0.5) continue;
+          if (b.min.y > headY) continue;
+          if (this.position.x + r > b.min.x && this.position.x - r < b.max.x &&
+              this.position.z + r > b.min.z && this.position.z - r < b.max.z) {
+            return;
+          }
+        }
+      }
+      this.isProne = false;
+      this.eyeHeight = EYE_HEIGHT_STAND;
+    } else {
+      this.isProne = true;
+      this.eyeHeight = EYE_HEIGHT_PRONE;
+    }
+  }
 
   takeDamage(d, source) {
     if (!this.alive) return;
@@ -111,7 +145,6 @@ export class Player {
       this.alive = false;
       this.respawnIn = PLAYER_RESPAWN_TIME;
       this.deaths++;
-      // If carrying enemy flag, drop it
       if (source?.game?.flagSystem?.carrier === this) {
         source.game.flagSystem.dropFlag(this.position.clone());
       }
@@ -129,12 +162,15 @@ export class Player {
       this.shooter.reserve[i] = Math.max(0, g.magsAtSpawn - 1);
     }
     this.shooter.reloading = 0;
-    this.onLadder = false;
-    this._ladderHouseTeam = null;
+    this.isProne = false;
+    this.eyeHeight = EYE_HEIGHT_STAND;
+    this._reviveTarget = null;
+    this._reviveProgress = 0;
   }
 
   applyCamera() {
     this.camera.position.copy(this.position);
+    this.camera.position.y = this.position.y - EYE_HEIGHT_STAND + this.eyeHeight;
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
@@ -160,26 +196,16 @@ export class Player {
       if (dx*dx + dz*dz <= z.r*z.r) { restock(this.shooter); break; }
     }
 
-    // Flag capture interaction: if standing on enemy flag home roof, grab it
-    // if carrying enemy flag and standing in own base, capture it
+    // Flag capture interaction
     game.flagSystem?.checkPlayerInteraction(this);
 
-    // Ladder detection
-    const ladderInfo = this._checkLadder(game.world.solids);
-    if (ladderInfo) {
-      this.onLadder = true;
-      this._ladderHouseTeam = ladderInfo.houseTeam;
-    } else if (this.onLadder) {
-      // Exited ladder: if at top, just fall; if jumped off mid-way, also fall
-      this.onLadder = false;
-      this._ladderHouseTeam = null;
+    // Medic revive / heal
+    if (this.role === ROLE_MEDIC) {
+      this.updateMedic(dt, game);
     }
 
-    if (this.onLadder) {
-      this._updateLadderMovement(dt);
-    } else {
-      this._updateNormalMovement(dt, game);
-    }
+    // Movement
+    this._updateMovement(dt, game);
 
     // Shooting
     if (this.mouseDown && canShoot(this.shooter)) this.shoot(game);
@@ -187,40 +213,48 @@ export class Player {
     this.applyCamera();
   }
 
-  _checkLadder(solids) {
-    for (const s of solids) {
-      if (!s.isLadder) continue;
-      const b = s.box;
-      if (this.position.x >= b.min.x && this.position.x <= b.max.x &&
-          this.position.z >= b.min.z && this.position.z <= b.max.z &&
-          this.position.y >= b.min.y - 0.2 && this.position.y <= b.max.y + 0.3) {
-        return { houseTeam: s.houseTeam };
+  updateMedic(dt, game) {
+    // Find nearest downed ally
+    let target = null, bestD = Infinity;
+    for (const b of game.bots) {
+      if (b.team !== this.team || !b.downed) continue;
+      const d = b.group.position.distanceTo(this.position);
+      if (d < bestD) { bestD = d; target = b; }
+    }
+    if (target && bestD <= REVIVE_RANGE) {
+      this._reviveTarget = target;
+      this._reviveProgress += dt;
+      if (this._reviveProgress >= REVIVE_TIME) {
+        target.reviveBy(this);
+        this._reviveProgress = 0;
+        this._reviveTarget = null;
       }
+    } else {
+      this._reviveTarget = null;
+      this._reviveProgress = 0;
+    }
+
+    // Heal nearby wounded allies automatically
+    for (const f of game.allFighters()) {
+      if (f.team !== this.team) continue;
+      if (f.isSelf?.(this)) continue;
+      if (!f.alive) continue;
+      if (f.hp >= PLAYER_HP) continue;
+      const d = f.getPos().distanceTo(this.position);
+      if (d <= HEAL_RANGE) {
+        f.heal(HEAL_PER_SEC * dt);
+      }
+    }
+  }
+
+  getReviveHUD() {
+    if (this._reviveTarget && this._reviveProgress > 0) {
+      return { progress: this._reviveProgress / REVIVE_TIME, target: this._reviveTarget };
     }
     return null;
   }
 
-  _updateLadderMovement(dt) {
-    const up = this.keys.has('KeyW') ? 1 : 0;
-    const down = this.keys.has('KeyS') ? 1 : 0;
-    const vy = (up - down) * LADDER_SPEED;
-    this.position.y += vy * dt;
-    // Clamp to ladder bounds
-    const roofY = HOUSE_SIZE.h + 0.5;
-    if (this.position.y > roofY + EYE_HEIGHT) {
-      this.position.y = roofY + EYE_HEIGHT;
-      this.onLadder = false;
-      this.velocity.y = 0;
-    }
-    if (this.position.y < EYE_HEIGHT) {
-      this.position.y = EYE_HEIGHT;
-    }
-    this.velocity.set(0, 0, 0);
-    this.onGround = false;
-    this._prevGroundY = null; // reset fall tracking on ladder
-  }
-
-  _updateNormalMovement(dt, game) {
+  _updateMovement(dt, game) {
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const dir = new THREE.Vector3();
@@ -230,12 +264,13 @@ export class Player {
     if (this.keys.has('KeyA')) dir.sub(right);
     if (dir.lengthSq() > 0) dir.normalize();
     let speed = MOVE_SPEED * speedMultFromHp(this.hp);
-    if (this.keys.has('ShiftLeft') && !this.shooter.ads) speed *= SPRINT_MULT;
+    if (this.keys.has('ShiftLeft') && !this.shooter.ads && !this.isProne) speed *= SPRINT_MULT;
     if (this.shooter.ads) speed *= 0.5;
+    if (this.isProne) speed *= 0.3;
     this.velocity.x = dir.x * speed;
     this.velocity.z = dir.z * speed;
 
-    if (this.keys.has('Space') && this.onGround) {
+    if (this.keys.has('Space') && this.onGround && !this.isProne) {
       this.velocity.y = JUMP_V;
       this.onGround = false;
     }
@@ -248,21 +283,23 @@ export class Player {
     const solids = game.world.solids;
     const stepX = this.velocity.x * dt;
     const stepZ = this.velocity.z * dt;
-    if (!this.collidesXZ(this.position.x + stepX, this.position.y, this.position.z, solids))
-      this.position.x += stepX;
-    if (!this.collidesXZ(this.position.x, this.position.y, this.position.z + stepZ, solids))
-      this.position.z += stepZ;
 
-    let nextY = this.position.y + this.velocity.y * dt;
-    const floorY = this.sampleFloor(this.position.x, this.position.z, solids) + EYE_HEIGHT;
-
-    // Fall damage: if we were on ground and now falling significantly
-    if (this.onGround && this._prevGroundY !== null && this.velocity.y < -2) {
-      // Will land soon
+    // Sub-step XZ movement to prevent tunneling through thin walls
+    const maxSubStep = 0.25;
+    const subSteps = Math.max(1, Math.ceil(Math.max(Math.abs(stepX), Math.abs(stepZ)) / maxSubStep));
+    for (let i = 0; i < subSteps; i++) {
+      const sx = stepX / subSteps;
+      const sz = stepZ / subSteps;
+      if (!this.collidesXZ(this.position.x + sx, this.position.y, this.position.z, solids))
+        this.position.x += sx;
+      if (!this.collidesXZ(this.position.x, this.position.y, this.position.z + sz, solids))
+        this.position.z += sz;
     }
 
+    let nextY = this.position.y + this.velocity.y * dt;
+    const floorY = this.sampleFloor(this.position.x, this.position.z, solids) + this.eyeHeight;
+
     if (nextY <= floorY) {
-      // Just landed
       if (!this.onGround && this._prevGroundY !== null) {
         const fallen = this._prevGroundY - floorY;
         if (fallen > FALL_DAMAGE_THRESHOLD) {
@@ -275,7 +312,6 @@ export class Player {
       this._prevGroundY = floorY;
     } else {
       if (this.onGround) {
-        // Just became airborne — record the height we left from for fall damage
         this._prevGroundY = this.position.y;
       }
       this.onGround = false;
@@ -285,11 +321,13 @@ export class Player {
 
   collidesXZ(px, py, pz, solids) {
     const r = 0.4;
-    const feetY = py - EYE_HEIGHT;
+    const feetY = py - this.eyeHeight;
     const min = new THREE.Vector3(px - r, feetY + 0.05, pz - r);
     const max = new THREE.Vector3(px + r, py + 0.2, pz + r);
     const test = new THREE.Box3(min, max);
-    const stepUp = this.onGround ? 1.6 : 0.4;
+    // Cars require a jump: on ground step-up is low (0.8), rising jump allows 2.0
+    const baseStep = this.onGround ? 0.8 : 0.4;
+    const stepUp = (!this.onGround && this.velocity.y > 1.5) ? 2.0 : baseStep;
     for (const s of solids) {
       const topY = s.box.max.y;
       if (topY - feetY <= stepUp && topY > feetY - 0.05) continue;
@@ -300,7 +338,7 @@ export class Player {
 
   sampleFloor(px, pz, solids) {
     let best = 0;
-    const feetY = this.position.y - EYE_HEIGHT;
+    const feetY = this.position.y - this.eyeHeight;
     for (const s of solids) {
       const b = s.box;
       if (px >= b.min.x - 0.4 && px <= b.max.x + 0.4 && pz >= b.min.z - 0.4 && pz <= b.max.z + 0.4) {
@@ -323,6 +361,7 @@ export class Player {
     dir.normalize();
 
     const origin = this.position.clone();
+    origin.y += this.eyeHeight - 0.2;
     this.raycaster.set(origin, dir);
     this.raycaster.far = gun.range;
 
@@ -333,7 +372,6 @@ export class Player {
       targets.push(bot.bodyMesh); map.set(bot.bodyMesh.uuid, { type: 'bot', ref: bot, head: false });
       targets.push(bot.headMesh); map.set(bot.headMesh.uuid, { type: 'bot', ref: bot, head: true });
     }
-    // Include house walls for collision blocking, but not damage in CTF mode
     for (const team of ['blue', 'red']) {
       const h = game.world.houses[team];
       for (const w of h.walls) { targets.push(w.mesh); map.set(w.mesh.uuid, { type: 'house', ref: h }); }
@@ -350,12 +388,9 @@ export class Player {
         const dmg = gun.damage * (info.head ? HEADSHOT_MULT : 1);
         const wasAlive = info.ref.alive || info.ref.downed;
         info.ref.takeDamage(dmg, game, info.head);
-        // Award kill if we killed them
         if (wasAlive && !info.ref.alive && !info.ref.downed) {
           this.kills++;
         }
-      } else if (info?.type === 'house') {
-        // House no longer takes damage in CTF mode; bullets are stopped by walls
       }
     }
 

@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import {
-  PLAYER_HP, GUNS, TEAM_COLOR, HOUSE_POS, RESPAWN_TIME,
+  PLAYER_HP, GUNS, TEAM_COLOR, TEAM_BLUE, HOUSE_POS, RESPAWN_TIME,
   ROLE_RIFLE, ROLE_MEDIC, ROLE_SNIPER, ROLE_GUN,
   HEADSHOT_MULT, DOWN_BLEEDOUT, REVIVE_TIME, HEAL_PER_SEC, HEAL_RANGE, REVIVE_RANGE,
-  RESTOCK_ZONES, speedMultFromHp, LADDER_SPEED, HOUSE_SIZE,
+  RESTOCK_ZONES, speedMultFromHp, HOUSE_SIZE,
 } from './constants.js';
 import {
   makeShooter, tickShooter, canShoot, startReload, consumeShot,
@@ -68,6 +68,9 @@ export class Bot {
     this._coverCooldown = 0;
     this._strafeDir = 1;
     this._strafeTimer = 0;
+
+    // Simple vertical physics
+    this.velocityY = 0;
   }
 
   takeDamage(d, game, isHead = false) {
@@ -104,7 +107,6 @@ export class Bot {
     this.group.visible = false;
     this.respawnIn = RESPAWN_TIME;
     this.deaths++;
-    // Drop flag if carrying
     if (game?.flagSystem?.carrier === this) {
       game.flagSystem.dropFlag(this.group.position.clone());
     }
@@ -126,6 +128,7 @@ export class Bot {
     this.group.visible = true;
     this.group.scale.y = 1;
     this.group.position.copy(this.spawnPos);
+    this.velocityY = 0;
     for (let i = 0; i < this.shooter.slots.length; i++) {
       this.shooter.ammo[i] = GUNS[this.shooter.slots[i]].mag;
       this.shooter.reserve[i] = Math.max(0, GUNS[this.shooter.slots[i]].magsAtSpawn - 1);
@@ -155,17 +158,31 @@ export class Bot {
     for (const z of RESTOCK_ZONES) {
       if (z.team && z.team !== this.team) continue;
       const dx = this.group.position.x - z.x, dz = this.group.position.z - z.z;
-      if (dx*dx + dz*dz <= z.r*z.r) { restock(this.shooter); break; }
+      if (dx*dx + dz*dz <= z.r*z.r) {
+        restock(this.shooter);
+        // Switch back to main weapon if we were on pistol
+        if (this.shooter.activeSlot === 0 && this.shooter.ammo[1] > 0) {
+          switchSlot(this.shooter, 1);
+        }
+        break;
+      }
     }
 
-    // CTF: check flag interactions (pickup dropped flags or grab from roof)
+    // CTF: check flag interactions
     game.flagSystem?.checkBotInteraction(this);
 
-    // Ladder handling
-    const ladder = this._checkLadder(game.world.solids);
-    if (ladder) {
-      this._climbLadder(dt, ladder, game);
-      return;
+    // Simple gravity & floor
+    const floorY = this._sampleFloor(game.world.solids);
+    if (this.group.position.y > floorY + 0.05) {
+      this.velocityY -= 22 * dt;
+      this.group.position.y += this.velocityY * dt;
+      if (this.group.position.y < floorY) {
+        this.group.position.y = floorY;
+        this.velocityY = 0;
+      }
+    } else {
+      this.group.position.y = floorY;
+      this.velocityY = 0;
     }
 
     if (this.role === ROLE_MEDIC) {
@@ -174,37 +191,17 @@ export class Bot {
     this.combatLogic(dt, game);
   }
 
-  _checkLadder(solids) {
+  _sampleFloor(solids) {
+    let best = 0;
+    const feetY = this.group.position.y;
+    const px = this.group.position.x, pz = this.group.position.z;
     for (const s of solids) {
-      if (!s.isLadder) continue;
       const b = s.box;
-      // Generous Y range so bots on the roof can still catch the ladder when stepping off edge
-      if (this.group.position.x >= b.min.x && this.group.position.x <= b.max.x &&
-          this.group.position.z >= b.min.z && this.group.position.z <= b.max.z &&
-          this.group.position.y >= b.min.y - 0.5 && this.group.position.y <= b.max.y + 2.5) {
-        return { houseTeam: s.houseTeam };
+      if (px >= b.min.x - 0.45 && px <= b.max.x + 0.45 && pz >= b.min.z - 0.45 && pz <= b.max.z + 0.45) {
+        if (b.max.y > best && b.max.y <= feetY + 3.0) best = b.max.y;
       }
     }
-    return null;
-  }
-
-  _climbLadder(dt, ladder, game) {
-    const roofY = HOUSE_SIZE.h + 0.5 + 1.0; // top of roof + bot center offset
-    const onGround = this.group.position.y <= 1.5;
-    const onRoof = this.group.position.y >= roofY - 0.5;
-    // Determine direction based on current objective
-    let goingUp = true;
-    if (onRoof) goingUp = false;
-    else if (onGround) goingUp = true;
-    // If somewhere in the middle, keep previous direction or default up
-    const dir = goingUp ? 1 : -1;
-    this.group.position.y += dir * LADDER_SPEED * dt;
-    if (goingUp && this.group.position.y >= roofY - 0.3) {
-      this.group.position.y = roofY;
-    }
-    if (!goingUp && this.group.position.y <= 0.8) {
-      this.group.position.y = 0.8;
-    }
+    return best;
   }
 
   medicLogic(dt, game) {
@@ -260,7 +257,6 @@ export class Bot {
     const stopRange   = STOP_RANGE[this.role]   ?? 22;
     const retreating = !opportunistic && this.hp > 0 && this.hp / PLAYER_HP < RETREAT_HP_FRAC;
 
-    // Find nearest enemy + note if any sniper is targeting us
     let target = null, dist = Infinity;
     let enemyHasSniper = false;
     for (const f of game.allFighters()) {
@@ -275,45 +271,38 @@ export class Bot {
     const enemyTeam = this.team === 'blue' ? 'red' : 'blue';
     const fs = game.flagSystem;
 
-    // CTF objective overrides normal combat target
     if (!opportunistic && fs) {
-      // If I am carrying the flag, go straight to my base
       if (fs.carrier === this) {
         const home = HOUSE_POS[this.team];
         const homePos = new THREE.Vector3(home.x, 0, home.z);
-        // If on a roof, first get to a ladder to climb down
         if (this._isOnRoof(enemyTeam) || this._isOnRoof(this.team)) {
-          const ladX = home.x + (this.team === 'blue' ? 1 : -1) * (HOUSE_SIZE.w / 2 + 0.6);
-          const ladderPos = new THREE.Vector3(ladX, 0, home.z);
-          target = { kind: 'ladder', pos: ladderPos, dist: this.group.position.distanceTo(ladderPos) };
+          const edgeZ = home.z + (this.team === 'blue' ? -1 : 1) * (HOUSE_SIZE.d / 2 + 2);
+          target = { kind: 'edge', pos: new THREE.Vector3(home.x, 0, edgeZ), dist: this.group.position.distanceTo(new THREE.Vector3(home.x, 0, edgeZ)) };
         } else {
           target = { kind: 'home', pos: homePos, dist: this.group.position.distanceTo(homePos) };
         }
       }
-      // Dropped enemy flag -> pick it up
       else if (fs.droppedPos && fs.droppedTeam !== this.team) {
         const d = this.group.position.distanceTo(fs.droppedPos);
         if (!target || d < target.dist + 20) {
           target = { kind: 'flag', pos: fs.droppedPos.clone().setY(1), dist: d };
         }
       }
-      // Enemy flag at home -> go grab it
       else if (fs.flagAtHome(enemyTeam)) {
         if (this._isOnRoof(enemyTeam)) {
-          // Already on enemy roof, go to flag pole
           const roofPos = new THREE.Vector3(HOUSE_POS[enemyTeam].x, HOUSE_SIZE.h + 1.5, HOUSE_POS[enemyTeam].z);
           target = { kind: 'roof', pos: roofPos, dist: this.group.position.distanceTo(roofPos) };
         } else {
-          // On ground: go to nearest ladder base
-          const ladX = HOUSE_POS[enemyTeam].x + (enemyTeam === 'blue' ? 1 : -1) * (HOUSE_SIZE.w / 2 + 0.6);
-          const ladderPos = new THREE.Vector3(ladX, 0, HOUSE_POS[enemyTeam].z);
-          const d = this.group.position.distanceTo(ladderPos);
+          const hp = HOUSE_POS[enemyTeam];
+          const sign = enemyTeam === TEAM_BLUE ? 1 : -1;
+          const approachZ = hp.z + sign * (HOUSE_SIZE.d / 2 + 3);
+          const approachPos = new THREE.Vector3(hp.x, 0, approachZ);
+          const d = this.group.position.distanceTo(approachPos);
           if (!target || d < target.dist + 40) {
-            target = { kind: 'ladder', pos: ladderPos, dist: d };
+            target = { kind: 'approach', pos: approachPos, dist: d };
           }
         }
       }
-      // Teammate carrying flag -> escort
       else if (fs.carrier && fs.carrier.team === this.team && fs.carrier !== this) {
         const cPos = fs.carrier.getPos ? fs.carrier.getPos() : fs.carrier.position.clone();
         const d = this.group.position.distanceTo(cPos);
@@ -325,14 +314,12 @@ export class Bot {
 
     if (!target) return;
 
-    // Find cover if enemy sniper is around and we are exposed
     let coverPos = null;
     if (enemyHasSniper && !retreating && target.kind === 'fighter' && target.dist > 40 && this._coverCooldown <= 0) {
       coverPos = this._findCover(game);
       if (coverPos) this._coverCooldown = 3;
     }
 
-    // Movement
     if (retreating) {
       const home = HOUSE_POS[this.team];
       const homePos = new THREE.Vector3(home.x, 0, home.z);
@@ -342,7 +329,7 @@ export class Bot {
       this.moveTowardWithUnstick(coverPos, dt, game);
       this.faceTarget(target.pos);
     } else {
-      const stop = target.kind === 'fighter' ? stopRange : (target.kind === 'flag' || target.kind === 'roof' ? 2 : (target.kind === 'ladder' || target.kind === 'home' ? 1 : 14));
+      const stop = target.kind === 'fighter' ? stopRange : (target.kind === 'flag' || target.kind === 'roof' ? 2 : (target.kind === 'approach' || target.kind === 'home' || target.kind === 'edge' ? 1 : 14));
       if (target.dist > stop) {
         this.moveTowardWithUnstick(target.pos, dt, game);
       } else if (target.kind === 'fighter' && this.role === ROLE_SNIPER && target.dist < stopRange * 0.6) {
@@ -353,7 +340,6 @@ export class Bot {
       this.faceTarget(target.pos);
     }
 
-    // Strafe when fighting to be harder to hit
     if (target.kind === 'fighter' && target.dist < engageRange && !retreating && !coverPos) {
       if (this._strafeTimer <= 0) {
         this._strafeDir *= -1;
@@ -372,9 +358,9 @@ export class Bot {
       else if (this.shooter.activeSlot !== 0) switchSlot(this.shooter, 0);
     }
 
-    // Low ammo -> go restock at nearest friendly zone
+    // Low ammo -> go restock at nearest friendly zone (even if on pistol)
     const totalAmmo = this.shooter.ammo[this.shooter.activeSlot] + this.shooter.reserve[this.shooter.activeSlot] * GUNS[this.shooter.slots[this.shooter.activeSlot]].mag;
-    if (!opportunistic && totalAmmo <= 3 && this.shooter.activeSlot !== 0) {
+    if (!opportunistic && totalAmmo <= 3) {
       let nearestZone = null, zdist = Infinity;
       for (const z of RESTOCK_ZONES) {
         if (z.team && z.team !== this.team) continue;
@@ -394,7 +380,6 @@ export class Bot {
   }
 
   _findCover(game) {
-    // Look for nearest solid that can block line-of-sight from nearest enemy
     let best = null, bestScore = -Infinity;
     const myPos = this.group.position;
     let nearestEnemyPos = null, nearestEnemyDist = Infinity;
@@ -406,14 +391,12 @@ export class Bot {
     }
     if (!nearestEnemyPos) return null;
     for (const s of game.world.solids) {
-      if (s.isLadder) continue;
       const c = s.box.getCenter(new THREE.Vector3());
       const dToMe = c.distanceTo(myPos);
       if (dToMe > 25 || dToMe < 2) continue;
-      // Prefer positions that put the solid BETWEEN us and the enemy
       const toEnemy = nearestEnemyPos.clone().sub(myPos).normalize();
       const toSolid = c.clone().sub(myPos).normalize();
-      const alignment = toEnemy.dot(toSolid); // higher = more in line
+      const alignment = toEnemy.dot(toSolid);
       const score = alignment * 2 - dToMe * 0.05;
       if (score > bestScore) { bestScore = score; best = c; }
     }
@@ -462,9 +445,19 @@ export class Bot {
     const top = feetY + 1.6;
     for (const s of solids) {
       const b = s.box;
-      if (b.max.y - feetY <= 1.5 && b.max.y > feetY - 0.05) continue;
+      if (b.max.y < feetY) continue;
       if (b.min.y > top) continue;
-      if (nx + r > b.min.x && nx - r < b.max.x && nz + r > b.min.z && nz - r < b.max.z) return true;
+      const heightDiff = b.max.y - feetY;
+      if (heightDiff <= 1.5 && heightDiff > -0.05) continue;
+      if (nx + r > b.min.x && nx - r < b.max.x && nz + r > b.min.z && nz - r < b.max.z) {
+        // Auto-jump onto climbable platforms
+        if (s.climbable && heightDiff > 1.5 && heightDiff <= 3.5) {
+          this.group.position.y = b.max.y + 0.05;
+          this.velocityY = 0;
+          return false;
+        }
+        return true;
+      }
     }
     return false;
   }
@@ -486,21 +479,17 @@ export class Bot {
     dir.normalize();
     makeMuzzleFlash(game.scene, activeGunId(this.shooter), origin.clone().add(dir.clone().multiplyScalar(0.5)), dir);
 
-    // LOS check: raycast to target; if a solid wall is in the way, miss
     const ray = new THREE.Raycaster(origin, dir.clone().normalize(), 0, target.dist + 2);
     const losTargets = [];
     const losMap = new Map();
-    // Target mesh (player adapter has no mesh; raycast then just checks for blocking walls)
     if (target.kind === 'fighter' && target.ref.bodyMesh) {
       losTargets.push(target.ref.bodyMesh);
       losMap.set(target.ref.bodyMesh.uuid, { type: 'target' });
     }
-    // All walls & solids (exclude bots to avoid false blocks from allies)
     for (const s of game.world.solids) {
       losTargets.push(s.mesh);
       losMap.set(s.mesh.uuid, { type: 'solid' });
     }
-    // House walls
     for (const team of ['blue', 'red']) {
       for (const w of game.world.houses[team].walls) {
         if (!losMap.has(w.mesh.uuid)) {
@@ -514,7 +503,6 @@ export class Bot {
       const first = losHits[0];
       const info = losMap.get(first.object.uuid);
       if (info?.type === 'solid' || info?.type === 'wall') {
-        // Blocked by wall — no hit
         return;
       }
     }
@@ -585,7 +573,7 @@ export function fighterAdapterPlayer(player) {
     get bodyMesh() { return null; },
     isSelf(other) { return false; },
     getPos() { return player.position.clone(); },
-    takeDamage(d) { player.takeDamage(d, { game: null }); },
+    takeDamage(d, game, head) { player.takeDamage(d, game); },
     heal(amount) { player.hp = Math.min(PLAYER_HP, player.hp + amount); },
   };
 }

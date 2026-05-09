@@ -1,4 +1,4 @@
-import { GUNS, RESTOCK_ZONES, TEAM_BLUE } from './constants.js';
+import { GUNS, RESTOCK_ZONES, TEAM_BLUE, ROLE_MEDIC } from './constants.js';
 import { activeGun, activeGunId } from './guns.js';
 
 export class HUD {
@@ -25,6 +25,24 @@ export class HUD {
     flagDiv.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:8px;color:#fff;font-size:14px;display:none;pointer-events:none;';
     document.getElementById('hud').appendChild(flagDiv);
     this.flagStatus = flagDiv;
+
+    // Prone / revive hint overlay
+    const hintDiv = document.createElement('div');
+    hintDiv.id = 'hud-hint';
+    hintDiv.style.cssText = 'position:absolute;bottom:110px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);padding:6px 14px;border-radius:6px;color:#fff;font-size:13px;display:none;pointer-events:none;';
+    document.getElementById('hud').appendChild(hintDiv);
+    this.hint = hintDiv;
+
+    // Revive progress bar
+    const revDiv = document.createElement('div');
+    revDiv.id = 'hud-revive';
+    revDiv.style.cssText = 'position:absolute;bottom:140px;left:50%;transform:translateX(-50%);width:160px;height:10px;background:rgba(0,0,0,0.5);border-radius:5px;overflow:hidden;display:none;pointer-events:none;';
+    const revBar = document.createElement('div');
+    revBar.style.cssText = 'width:0%;height:100%;background:#22c55e;';
+    revDiv.appendChild(revBar);
+    document.getElementById('hud').appendChild(revDiv);
+    this.reviveBar = revBar;
+    this.reviveContainer = revDiv;
   }
 
   update(game) {
@@ -41,7 +59,10 @@ export class HUD {
 
     this.hp.textContent = `HP ${p.hp}`;
     this.hp.style.color = p.hp > 60 ? '#86efac' : p.hp > 30 ? '#fde68a' : '#fca5a5';
-    this.role.textContent = `Role: ${p.role}`;
+
+    let roleText = `Role: ${p.role}`;
+    if (p.isProne) roleText += ' [PRONE]';
+    this.role.textContent = roleText;
 
     const blueAlive = (p.alive ? 1 : 0) + game.bots.filter(b => b.team === 'blue' && b.alive).length;
     const redAlive = game.bots.filter(b => b.team === 'red' && b.alive).length;
@@ -76,6 +97,33 @@ export class HUD {
       this.flagStatus.style.background = 'rgba(100,80,0,0.7)';
     } else {
       this.flagStatus.style.display = 'none';
+    }
+
+    // Medic revive hint & progress
+    const rev = p.getReviveHUD?.();
+    if (rev) {
+      this.reviveContainer.style.display = 'block';
+      this.reviveBar.style.width = `${rev.progress * 100}%`;
+      this.hint.style.display = 'block';
+      this.hint.textContent = '💉 Reviving teammate…';
+    } else if (p.role === ROLE_MEDIC) {
+      this.reviveContainer.style.display = 'none';
+      // Show hint if near a downed ally
+      let nearDowned = false;
+      for (const b of game.bots) {
+        if (b.team === p.team && b.downed && b.group.position.distanceTo(p.position) < 4) {
+          nearDowned = true; break;
+        }
+      }
+      if (nearDowned) {
+        this.hint.style.display = 'block';
+        this.hint.textContent = '💉 Stay close to revive downed ally';
+      } else {
+        this.hint.style.display = 'none';
+      }
+    } else {
+      this.reviveContainer.style.display = 'none';
+      this.hint.style.display = 'none';
     }
 
     // Zone hint
