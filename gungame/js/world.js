@@ -24,11 +24,12 @@ export function buildWorld(scene) {
     [TEAM_RED]:  makeHouse(scene, TEAM_RED),
   };
 
-  // Solids
+  // Solids — walls are NOT climbable (otherwise bot auto-jump teleports over them);
+  // roofs ARE climbable so bots reach the flag via the parkour platforms.
   const solids = [];
   for (const team of [TEAM_BLUE, TEAM_RED]) {
-    for (const w of houses[team].walls) solids.push({ mesh: w.mesh, box: w.box, climbable: true });
-    solids.push({ mesh: houses[team].roof, box: new THREE.Box3().setFromObject(houses[team].roof), climbable: true });
+    for (const w of houses[team].walls) solids.push({ mesh: w.mesh, box: w.box, climbable: false });
+    solids.push({ mesh: houses[team].roof, box: houses[team].roofBox, climbable: true });
   }
 
   // Cover crates (climbable)
@@ -140,12 +141,13 @@ export function buildWorld(scene) {
     // Two columns of platforms on each side of the back of the house
     for (const sideOffset of [-6, 6]) {
       const platX = hp.x + sideOffset;
-      const heights = [1.5, 3.5, 5.5, 7.3];
-      const zOffsets = [2.0, 0.5, -1.0, -2.5];
+      const heights = [1.4, 2.8, 4.4];
+      const zOffsets = [2.0, 0.5, -1.5];
       for (let i = 0; i < heights.length; i++) {
         const p = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.35, 1.0), platMat);
         p.position.set(platX, heights[i], baseZ + sign * zOffsets[i]);
         scene.add(p);
+        p.updateMatrixWorld(true);
         solids.push({ mesh: p, box: new THREE.Box3().setFromObject(p), climbable: true });
       }
     }
@@ -177,7 +179,14 @@ function makeShack(scene, sp, solids) {
   const sw = sp.w, sh = sp.h, sd = sp.d;
   const wallMat = new THREE.MeshLambertMaterial({ color: sp.color });
   const frameMat = new THREE.MeshLambertMaterial({ color: 0x5a3a1a });
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
+  const glassMat = new THREE.MeshBasicMaterial({
+    color: 0x88ccff, transparent: true, opacity: 0.18,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const addWall = (mesh) => {
+    scene.add(mesh);
+    solids.push({ mesh, box: new THREE.Box3().setFromObject(mesh), climbable: false });
+  };
 
   // Front has a door opening
   const frontZ = sp.z - sd / 2;
@@ -185,14 +194,14 @@ function makeShack(scene, sp, solids) {
   const sideW = (sw - doorW) / 2;
   const fl = new THREE.Mesh(new THREE.BoxGeometry(sideW, sh, 0.3), wallMat);
   fl.position.set(sp.x - (doorW / 2 + sideW / 2), sh / 2, frontZ);
-  scene.add(fl); solids.push({ mesh: fl, box: new THREE.Box3().setFromObject(fl), climbable: true });
+  addWall(fl);
   const fr = new THREE.Mesh(new THREE.BoxGeometry(sideW, sh, 0.3), wallMat);
   fr.position.set(sp.x + (doorW / 2 + sideW / 2), sh / 2, frontZ);
-  scene.add(fr); solids.push({ mesh: fr, box: new THREE.Box3().setFromObject(fr), climbable: true });
+  addWall(fr);
   const lintelH = sh - doorH;
   const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW, lintelH, 0.3), wallMat);
   lintel.position.set(sp.x, doorH + lintelH / 2, frontZ);
-  scene.add(lintel); solids.push({ mesh: lintel, box: new THREE.Box3().setFromObject(lintel), climbable: true });
+  addWall(lintel);
 
   // Door frame visuals
   const frameThick = 0.15;
@@ -206,7 +215,7 @@ function makeShack(scene, sp, solids) {
   // Back wall (solid)
   const back = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, 0.3), wallMat);
   back.position.set(sp.x, sh / 2, sp.z + sd / 2);
-  scene.add(back); solids.push({ mesh: back, box: new THREE.Box3().setFromObject(back), climbable: true });
+  addWall(back);
 
   // Side walls with windows
   const winW = 1.8, winH = 1.2, winBottom = 1.0;
@@ -216,12 +225,12 @@ function makeShack(scene, sp, solids) {
     // Bottom solid strip
     const botStrip = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winBottom, sd), wallMat);
     botStrip.position.set(sideX, winBottom / 2, sp.z);
-    scene.add(botStrip); solids.push({ mesh: botStrip, box: new THREE.Box3().setFromObject(botStrip), climbable: true });
+    addWall(botStrip);
     // Top solid strip
     const topStripH = sh - (winBottom + winH);
     const topStrip = new THREE.Mesh(new THREE.BoxGeometry(wallThick, topStripH, sd), wallMat);
     topStrip.position.set(sideX, winBottom + winH + topStripH / 2, sp.z);
-    scene.add(topStrip); solids.push({ mesh: topStrip, box: new THREE.Box3().setFromObject(topStrip), climbable: true });
+    addWall(topStrip);
 
     // Window edges and center pillar
     const pillarW = 0.8;
@@ -229,25 +238,27 @@ function makeShack(scene, sp, solids) {
     if (edgeSegD > 0) {
       const leftSeg = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, edgeSegD), wallMat);
       leftSeg.position.set(sideX, winBottom + winH / 2, sp.z - sd / 2 + edgeSegD / 2);
-      scene.add(leftSeg); solids.push({ mesh: leftSeg, box: new THREE.Box3().setFromObject(leftSeg), climbable: true });
+      addWall(leftSeg);
 
       const rightSeg = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, edgeSegD), wallMat);
       rightSeg.position.set(sideX, winBottom + winH / 2, sp.z + sd / 2 - edgeSegD / 2);
-      scene.add(rightSeg); solids.push({ mesh: rightSeg, box: new THREE.Box3().setFromObject(rightSeg), climbable: true });
+      addWall(rightSeg);
     }
     const pillar = new THREE.Mesh(new THREE.BoxGeometry(wallThick, winH, pillarW), wallMat);
     pillar.position.set(sideX, winBottom + winH / 2, sp.z);
-    scene.add(pillar); solids.push({ mesh: pillar, box: new THREE.Box3().setFromObject(pillar), climbable: true });
+    addWall(pillar);
 
-    // Glass panes
+    // Glass panes — thin planes for clear see-through
     for (const offset of [-winW / 2 - pillarW / 2, winW / 2 + pillarW / 2]) {
-      const glass = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.05, winH, winW), glassMat);
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(winW, winH), glassMat);
       glass.position.set(sideX, winBottom + winH / 2, sp.z + offset);
+      glass.rotation.y = Math.PI / 2;
+      glass.renderOrder = 1;
       scene.add(glass);
     }
   }
 
-  // Roof
+  // Roof — climbable so bots and players can stand on it
   const roof = new THREE.Mesh(new THREE.BoxGeometry(sw + 0.6, 0.3, sd + 0.6), new THREE.MeshLambertMaterial({ color: 0x333333 }));
   roof.position.set(sp.x, sh + 0.15, sp.z);
   scene.add(roof);
@@ -263,14 +274,18 @@ function makeHouse(scene, team) {
   const wallMat = new THREE.MeshLambertMaterial({ color });
   const roofMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
   const frameMat = new THREE.MeshLambertMaterial({ color: 0x5a3a1a });
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
+  // Highly transparent glass: thin plane + depthWrite off so you can clearly see through.
+  const glassMat = new THREE.MeshBasicMaterial({
+    color: 0x88ccff, transparent: true, opacity: 0.18,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
   const w = HOUSE_SIZE.w, h = HOUSE_SIZE.h, d = HOUSE_SIZE.d;
   const t = 0.5;
   const walls = [];
 
   function addWall(mesh) {
     group.add(mesh);
-    walls.push({ mesh, box: new THREE.Box3().setFromObject(mesh) });
+    walls.push({ mesh });
   }
 
   // Back wall (solid)
@@ -281,7 +296,7 @@ function makeHouse(scene, team) {
 
   // Front wall with door opening
   const frontZ = team === TEAM_BLUE ? -d / 2 : d / 2;
-  const doorW = 4, doorH = 3.2;
+  const doorW = 4, doorH = 3.0;
   const sideW = (w - doorW) / 2;
   const fl = new THREE.Mesh(new THREE.BoxGeometry(sideW, h, t), wallMat);
   fl.position.set(-(doorW / 2 + sideW / 2), h / 2, frontZ);
@@ -306,8 +321,8 @@ function makeHouse(scene, team) {
   dfTop.position.set(0, doorH, frontZ);
   group.add(dfTop);
 
-  // Side walls with windows — height aligned with eye level (~1.6)
-  const winW = 3, winH = 1.6, winBottom = 1.2;
+  // Side walls with windows — sized to fit shorter house
+  const winW = 3, winH = 1.4, winBottom = 1.0;
   const winZCenters = [-3.5, 3.5];
 
   for (const side of ['left', 'right']) {
@@ -336,8 +351,11 @@ function makeHouse(scene, team) {
     addWall(pillar);
 
     for (const wz of winZCenters) {
-      const glass = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.05, winH, winW), glassMat);
+      // Use a thin plane for the glass so transparency reads clearly (no double-face stacking).
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(winW, winH), glassMat);
       glass.position.set(sideX, winBottom + winH / 2, wz);
+      glass.rotation.y = Math.PI / 2;
+      glass.renderOrder = 1;
       group.add(glass);
       const wfTop = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.1, 0.1, winW + 0.2), frameMat);
       wfTop.position.set(sideX, winBottom + winH, wz); group.add(wfTop);
@@ -361,9 +379,20 @@ function makeHouse(scene, team) {
   group.add(pole);
 
   scene.add(group);
+  // Force-resolve world matrices BEFORE computing collision boxes — three.js r160's
+  // Box3.setFromObject calls updateWorldMatrix(false, false), which does NOT walk up
+  // to refresh the parent group's matrixWorld. Without this, all wall boxes end up at
+  // the local-space position (group offset ignored) and the player walks straight
+  // through the house.
+  group.updateMatrixWorld(true);
+
+  for (const wRec of walls) {
+    wRec.box = new THREE.Box3().setFromObject(wRec.mesh);
+  }
+  const roofBox = new THREE.Box3().setFromObject(roof);
 
   const house = {
-    team, group, walls, roof, pos, pole,
+    team, group, walls, roof, roofBox, pos, pole,
     ladders: [],
     hp: HOUSE_HP, maxHp: HOUSE_HP,
     onDestroyed() { group.visible = false; },

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER_HP, GUNS, TEAM_BLUE, HEADSHOT_MULT, RESTOCK_ZONES, speedMultFromHp, ROLE_RIFLE, ROLE_GUN, PLAYER_RESPAWN_TIME, HOUSE_POS, FALL_DAMAGE, FALL_DAMAGE_THRESHOLD, ROLE_MEDIC, REVIVE_TIME, REVIVE_RANGE, HEAL_PER_SEC, HEAL_RANGE } from './constants.js';
+import { PLAYER_HP, GUNS, TEAM_BLUE, HEADSHOT_MULT, RESTOCK_ZONES, speedMultFromHp, ROLE_RIFLE, ROLE_GUN, PLAYER_RESPAWN_TIME, HOUSE_POS, FALL_DAMAGE, FALL_DAMAGE_THRESHOLD, ROLE_MEDIC, REVIVE_TIME, REVIVE_RANGE, HEAL_RANGE, MEDIC_HEAL_PER_VISIT } from './constants.js';
 import { makeGunMesh, makeMuzzleFlash, makeShooter, tickShooter, canShoot, startReload, consumeShot, switchSlot, activeGun, activeGunId, restock, setMainGun } from './guns.js';
 
 const EYE_HEIGHT_STAND = 1.6;
@@ -138,15 +138,19 @@ export class Player {
     }
   }
 
-  takeDamage(d, source) {
+  takeDamage(d, game) {
     if (!this.alive) return;
     this.hp = Math.max(0, this.hp - d);
     if (this.hp <= 0) {
       this.alive = false;
       this.respawnIn = PLAYER_RESPAWN_TIME;
       this.deaths++;
-      if (source?.game?.flagSystem?.carrier === this) {
-        source.game.flagSystem.dropFlag(this.position.clone());
+      // The 2nd arg is the game object (passed in via fighterAdapterPlayer.takeDamage).
+      // Previously this looked at source?.game?.flagSystem which never resolved,
+      // so the player carrier never dropped the flag on death — the flag would teleport
+      // home with their respawn instead of falling at the death site.
+      if (game?.flagSystem?.carrier === this) {
+        game.flagSystem.dropFlag(this.position.clone());
       }
     }
   }
@@ -199,7 +203,7 @@ export class Player {
     // Flag capture interaction
     game.flagSystem?.checkPlayerInteraction(this);
 
-    // Medic revive / heal
+    // Medic revive
     if (this.role === ROLE_MEDIC) {
       this.updateMedic(dt, game);
     }
@@ -214,7 +218,10 @@ export class Player {
   }
 
   updateMedic(dt, game) {
-    // Find nearest downed ally
+    // Medic abilities (no self-heal):
+    //   1. Revive a downed ally within REVIVE_RANGE after channeling REVIVE_TIME.
+    //   2. Proximity heal — when a wounded ally first enters HEAL_RANGE, restore
+    //      MEDIC_HEAL_PER_VISIT HP. They must leave and re-enter for another boost.
     let target = null, bestD = Infinity;
     for (const b of game.bots) {
       if (b.team !== this.team || !b.downed) continue;
@@ -234,17 +241,26 @@ export class Player {
       this._reviveProgress = 0;
     }
 
-    // Heal nearby wounded allies automatically
-    for (const f of game.allFighters()) {
-      if (f.team !== this.team) continue;
-      if (f.isSelf?.(this)) continue;
-      if (!f.alive) continue;
-      if (f.hp >= PLAYER_HP) continue;
-      const d = f.getPos().distanceTo(this.position);
-      if (d <= HEAL_RANGE) {
-        f.heal(HEAL_PER_SEC * dt);
+    this._processProximityHeal(game);
+  }
+
+  _processProximityHeal(game) {
+    const inRange = new Set();
+    for (const b of game.bots) {
+      if (b.team !== this.team) continue;
+      if (!b.alive || b.downed) continue;
+      const d = b.group.position.distanceTo(this.position);
+      if (d > HEAL_RANGE) continue;
+      inRange.add(b);
+      const prev = this._healedAllies;
+      if (!prev || !prev.has(b)) {
+        if (b.hp < PLAYER_HP) {
+          b.hp = Math.min(PLAYER_HP, b.hp + MEDIC_HEAL_PER_VISIT);
+          b.updateHpBar();
+        }
       }
     }
+    this._healedAllies = inRange;
   }
 
   getReviveHUD() {

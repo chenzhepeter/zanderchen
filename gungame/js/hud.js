@@ -1,4 +1,4 @@
-import { GUNS, RESTOCK_ZONES, TEAM_BLUE, ROLE_MEDIC } from './constants.js';
+import { GUNS, RESTOCK_ZONES, TEAM_BLUE, ROLE_MEDIC, TEAM_SIZE } from './constants.js';
 import { activeGun, activeGunId } from './guns.js';
 
 export class HUD {
@@ -43,6 +43,54 @@ export class HUD {
     document.getElementById('hud').appendChild(revDiv);
     this.reviveBar = revBar;
     this.reviveContainer = revDiv;
+
+    // Per-fighter K/D rosters under each team panel
+    const rosterCss = 'margin-top:6px;font-size:11px;color:#cbd5e1;line-height:1.5;border-top:1px solid rgba(255,255,255,0.18);padding-top:4px;min-width:170px;';
+    this.blueRoster = document.createElement('div');
+    this.blueRoster.id = 'hud-blue-roster';
+    this.blueRoster.style.cssText = rosterCss;
+    document.getElementById('hud-top-left').appendChild(this.blueRoster);
+
+    this.redRoster = document.createElement('div');
+    this.redRoster.id = 'hud-red-roster';
+    this.redRoster.style.cssText = rosterCss;
+    document.getElementById('hud-top-right').appendChild(this.redRoster);
+  }
+
+  _buildRosterHTML(rows) {
+    return rows.map(r => {
+      let color = '#e2e8f0';
+      let suffix = '';
+      if (r.downed) { color = '#fbbf24'; suffix = ' <span style="opacity:.8">⚠</span>'; }
+      else if (!r.alive) { color = '#6b7280'; suffix = ' <span style="opacity:.7">💀</span>'; }
+      const labelStyle = r.isPlayer ? 'font-weight:bold;color:#fde68a' : '';
+      return `<div style="display:flex;justify-content:space-between;color:${color}">` +
+             `<span style="${labelStyle}">${r.label}${suffix}</span>` +
+             `<span style="font-variant-numeric:tabular-nums">${r.kills} / ${r.deaths}</span>` +
+             `</div>`;
+    }).join('');
+  }
+
+  _rosterRows(game, team) {
+    const rows = [];
+    if (team === game.player.team) {
+      const p = game.player;
+      rows.push({ label: 'You', kills: p.kills, deaths: p.deaths, alive: p.alive, downed: false, isPlayer: true });
+    }
+    const roleCounts = {};
+    for (const b of game.bots) {
+      if (b.team !== team) continue;
+      roleCounts[b.role] = (roleCounts[b.role] || 0) + 1;
+    }
+    const roleSeen = {};
+    for (const b of game.bots) {
+      if (b.team !== team) continue;
+      roleSeen[b.role] = (roleSeen[b.role] || 0) + 1;
+      const cap = b.role.charAt(0).toUpperCase() + b.role.slice(1);
+      const label = roleCounts[b.role] > 1 ? `${cap} ${roleSeen[b.role]}` : cap;
+      rows.push({ label, kills: b.kills, deaths: b.deaths, alive: b.alive, downed: b.downed, isPlayer: false });
+    }
+    return rows;
   }
 
   update(game) {
@@ -66,18 +114,20 @@ export class HUD {
 
     const blueAlive = (p.alive ? 1 : 0) + game.bots.filter(b => b.team === 'blue' && b.alive).length;
     const redAlive = game.bots.filter(b => b.team === 'red' && b.alive).length;
-    this.blueAlive.textContent = `Blue: ${blueAlive} / 5`;
-    this.redAlive.textContent = `Red: ${redAlive} / 5`;
+    this.blueAlive.textContent = `Blue: ${blueAlive} / ${TEAM_SIZE}`;
+    this.redAlive.textContent = `Red: ${redAlive} / ${TEAM_SIZE}`;
 
-    // K/D stats
+    // K/D stats — team totals + per-fighter rosters
     let blueKills = p.kills, blueDeaths = p.deaths;
     let redKills = 0, redDeaths = 0;
     for (const b of game.bots) {
       if (b.team === 'blue') { blueKills += b.kills; blueDeaths += b.deaths; }
       else { redKills += b.kills; redDeaths += b.deaths; }
     }
-    this.blueKd.textContent = `K/D: ${blueKills} / ${blueDeaths}`;
-    this.redKd.textContent = `K/D: ${redKills} / ${redDeaths}`;
+    this.blueKd.textContent = `Team K/D: ${blueKills} / ${blueDeaths}`;
+    this.redKd.textContent = `Team K/D: ${redKills} / ${redDeaths}`;
+    this.blueRoster.innerHTML = this._buildRosterHTML(this._rosterRows(game, 'blue'));
+    this.redRoster.innerHTML = this._buildRosterHTML(this._rosterRows(game, 'red'));
 
     // Flag status
     const fs = game.flagSystem;

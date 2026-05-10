@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import {
   PLAYER_HP, GUNS, TEAM_COLOR, TEAM_BLUE, HOUSE_POS, RESPAWN_TIME,
   ROLE_RIFLE, ROLE_MEDIC, ROLE_SNIPER, ROLE_GUN,
-  HEADSHOT_MULT, DOWN_BLEEDOUT, REVIVE_TIME, HEAL_PER_SEC, HEAL_RANGE, REVIVE_RANGE,
+  HEADSHOT_MULT, DOWN_BLEEDOUT, REVIVE_TIME, REVIVE_RANGE, REVIVE_HP_FRAC,
+  HEAL_RANGE, MEDIC_HEAL_PER_VISIT,
   RESTOCK_ZONES, speedMultFromHp, HOUSE_SIZE,
 } from './constants.js';
 import {
@@ -83,7 +84,7 @@ export class Bot {
     this.updateHpBar();
     if (this.hp <= 0) {
       if (isHead || d >= PLAYER_HP) this.die(game);
-      else this.goDown();
+      else this.goDown(game);
     }
   }
 
@@ -93,12 +94,17 @@ export class Bot {
     this.hpBar.material.color.setHSL(0.33 * r, 1, 0.5);
   }
 
-  goDown() {
+  goDown(game) {
     this.downed = true;
     this.alive = false;
     this.bleedoutTimer = DOWN_BLEEDOUT;
     this.group.scale.y = 0.4;
     this.hpBar.material.color.set(0xffaa00);
+    // A downed carrier can no longer run with the flag — drop it on the spot so the
+    // enemy team has a window to take it back even if a medic eventually revives.
+    if (game?.flagSystem?.carrier === this) {
+      game.flagSystem.dropFlag(this.group.position.clone());
+    }
   }
 
   die(game) {
@@ -115,8 +121,9 @@ export class Bot {
   reviveBy(medic) {
     this.downed = false;
     this.alive = true;
-    this.hp = Math.round(PLAYER_HP * 0.5);
+    this.hp = Math.round(PLAYER_HP * REVIVE_HP_FRAC);
     this.bleedoutTimer = 0;
+    this._reviveProgress = 0;
     this.group.scale.y = 1;
     this.group.visible = true;
     this.updateHpBar();
@@ -186,9 +193,48 @@ export class Bot {
     }
 
     if (this.role === ROLE_MEDIC) {
+      this._processProximityHeal(game);
       if (this.medicLogic(dt, game)) return;
     }
     this.combatLogic(dt, game);
+  }
+
+  // Proximity heal: every time a wounded ally enters this medic's HEAL_RANGE
+  // (rising edge, not per-frame), give them MEDIC_HEAL_PER_VISIT HP. They must
+  // leave the radius and come back to receive another boost. Self-heal is excluded.
+  _processProximityHeal(game) {
+    const inRange = new Set();
+    const here = this.group.position;
+    // Player ally
+    const player = game.player;
+    if (player && player !== this && player.team === this.team && player.alive) {
+      const d = here.distanceTo(player.position);
+      if (d <= HEAL_RANGE) {
+        inRange.add(player);
+        const prev = this._healedAllies;
+        if (!prev || !prev.has(player)) {
+          if (player.hp < PLAYER_HP) {
+            player.hp = Math.min(PLAYER_HP, player.hp + MEDIC_HEAL_PER_VISIT);
+          }
+        }
+      }
+    }
+    // Bot allies
+    for (const b of game.bots) {
+      if (b === this || b.team !== this.team) continue;
+      if (!b.alive || b.downed) continue; // downed = revive, not heal
+      const d = here.distanceTo(b.group.position);
+      if (d > HEAL_RANGE) continue;
+      inRange.add(b);
+      const prev = this._healedAllies;
+      if (!prev || !prev.has(b)) {
+        if (b.hp < PLAYER_HP) {
+          b.hp = Math.min(PLAYER_HP, b.hp + MEDIC_HEAL_PER_VISIT);
+          b.updateHpBar();
+        }
+      }
+    }
+    this._healedAllies = inRange;
   }
 
   _sampleFloor(solids) {
@@ -205,6 +251,7 @@ export class Bot {
   }
 
   medicLogic(dt, game) {
+    // Medic role only revives downed allies — no auto-healing of wounded teammates.
     let downedAlly = null, ddist = Infinity;
     for (const b of game.bots) {
       if (b === this) continue;
@@ -214,34 +261,39 @@ export class Bot {
       if (d < ddist) { ddist = d; downedAlly = b; }
     }
     if (downedAlly) {
-      this.moveToward(downedAlly.group.position, dt, 0, game);
-      this.faceTarget(downedAlly.group.position);
+      // Stop just inside revive range so the medic doesn't walk on top of the ally.
+      this.moveToward(downedAlly.group.position, dt, REVIVE_RANGE * 0.7, game);
       if (ddist <= REVIVE_RANGE) {
+        this.faceTarget(downedAlly.group.position);
         downedAlly._reviveProgress = (downedAlly._reviveProgress || 0) + dt;
         if (downedAlly._reviveProgress >= REVIVE_TIME) {
           downedAlly._reviveProgress = 0;
           downedAlly.reviveBy(this);
         }
+      } else {
+        // Out of range and walking in — reset progress, but defend self by shooting
+        // any visible enemy. Without this the medic was a sitting duck en route.
+        downedAlly._reviveProgress = 0;
+        this._shootNearestEnemy(game);
       }
       return true;
     }
-    let woundAlly = null, hdist = Infinity;
-    for (const f of game.allFighters()) {
-      if (f.team !== this.team) continue;
-      if (f.isSelf?.(this)) continue;
-      if (!f.alive) continue;
-      if (f.hp >= PLAYER_HP) continue;
-      const d = f.getPos().distanceTo(this.group.position);
-      if (d < hdist) { hdist = d; woundAlly = f; }
-    }
-    if (woundAlly && hdist <= HEAL_RANGE * 2.0) {
-      this.moveToward(woundAlly.getPos(), dt, HEAL_RANGE * 0.6, game);
-      this.faceTarget(woundAlly.getPos());
-      if (hdist <= HEAL_RANGE) woundAlly.heal(HEAL_PER_SEC * dt);
-      this.combatLogic(dt, game, /*opportunistic=*/true);
-      return true;
-    }
     return false;
+  }
+
+  _shootNearestEnemy(game) {
+    let target = null, dist = Infinity;
+    for (const f of game.allFighters()) {
+      if (f.team === this.team || !f.alive) continue;
+      const p = f.getPos();
+      const d = p.distanceTo(this.group.position);
+      if (d < dist) { dist = d; target = { kind: 'fighter', ref: f, pos: p, dist: d }; }
+    }
+    if (!target) return;
+    const engageRange = ENGAGE_RANGE[this.role] ?? 60;
+    if (target.dist > engageRange) return;
+    this.faceTarget(target.pos);
+    if (canShoot(this.shooter)) this.fireAt(target, game);
   }
 
   _isOnRoof(team) {
@@ -281,6 +333,13 @@ export class Bot {
         } else {
           target = { kind: 'home', pos: homePos, dist: this.group.position.distanceTo(homePos) };
         }
+      }
+      // Enemy is running off with our flag — make the carrier the priority fighter
+      // target so at least the closest defender breaks off to chase / shoot them.
+      else if (fs.carrier && fs.carrier.team !== this.team && fs.carrier.alive) {
+        const cPos = fs.carrier.getPos ? fs.carrier.getPos() : fs.carrier.position.clone();
+        const d = this.group.position.distanceTo(cPos);
+        target = { kind: 'fighter', ref: fs.carrier, pos: cPos, dist: d };
       }
       else if (fs.droppedPos && fs.droppedTeam !== this.team) {
         const d = this.group.position.distanceTo(fs.droppedPos);
@@ -334,8 +393,8 @@ export class Bot {
         this.moveTowardWithUnstick(target.pos, dt, game);
       } else if (target.kind === 'fighter' && this.role === ROLE_SNIPER && target.dist < stopRange * 0.6) {
         const away = this.group.position.clone().sub(target.pos).setY(0).normalize();
-        this.group.position.x += away.x * BOT_SPEED * 0.6 * dt;
-        this.group.position.z += away.z * BOT_SPEED * 0.6 * dt;
+        const speed = BOT_SPEED * 0.6;
+        this._stepCollisionAware(away.x * speed * dt, away.z * speed * dt, game);
       }
       this.faceTarget(target.pos);
     }
@@ -348,8 +407,7 @@ export class Bot {
       const speed = BOT_SPEED * speedMultFromHp(this.hp) * 0.5;
       const fwd = target.pos.clone().sub(this.group.position).setY(0).normalize();
       const lat = new THREE.Vector3(-fwd.z, 0, fwd.x).multiplyScalar(this._strafeDir);
-      this.group.position.x += lat.x * speed * dt;
-      this.group.position.z += lat.z * speed * dt;
+      this._stepCollisionAware(lat.x * speed * dt, lat.z * speed * dt, game);
     }
 
     // Reload / fall back to pistol
@@ -428,8 +486,12 @@ export class Bot {
     if (d <= stopDist) return;
     dir.normalize();
     const speed = BOT_SPEED * speedMultFromHp(this.hp);
-    const stepX = dir.x * speed * dt;
-    const stepZ = dir.z * speed * dt;
+    this._stepCollisionAware(dir.x * speed * dt, dir.z * speed * dt, game);
+  }
+
+  // Apply an XZ step but respect solids — used for strafe & sniper backpedal,
+  // which previously mutated position directly and let bots phase through walls.
+  _stepCollisionAware(stepX, stepZ, game) {
     const solids = game?.world?.solids;
     if (!solids || !this._wouldHit(this.group.position.x + stepX, this.group.position.z, solids)) {
       this.group.position.x += stepX;
@@ -443,15 +505,19 @@ export class Bot {
     const r = 0.45;
     const feetY = this.group.position.y;
     const top = feetY + 1.6;
+    const STEP_UP = 0.8;     // matches the player's grounded step-up
+    const CLIMB_MAX = 3.5;
     for (const s of solids) {
       const b = s.box;
       if (b.max.y < feetY) continue;
       if (b.min.y > top) continue;
       const heightDiff = b.max.y - feetY;
-      if (heightDiff <= 1.5 && heightDiff > -0.05) continue;
+      if (heightDiff <= STEP_UP) continue; // step over small obstacles (curbs, ramp lips)
       if (nx + r > b.min.x && nx - r < b.max.x && nz + r > b.min.z && nz - r < b.max.z) {
-        // Auto-jump onto climbable platforms
-        if (s.climbable && heightDiff > 1.5 && heightDiff <= 3.5) {
+        // Auto-jump only onto things explicitly marked climbable (crates, cars, ramps,
+        // platforms, roofs). Walls/pillars are NOT climbable, so this won't teleport
+        // bots through houses.
+        if (s.climbable && heightDiff > STEP_UP && heightDiff <= CLIMB_MAX) {
           this.group.position.y = b.max.y + 0.05;
           this.velocityY = 0;
           return false;
@@ -522,11 +588,6 @@ export class Bot {
     }
   }
 
-  heal(amount) {
-    if (!this.alive || this.downed) return;
-    this.hp = Math.min(PLAYER_HP, this.hp + amount);
-    this.updateHpBar();
-  }
 }
 
 function makeRoleSprite(role) {
@@ -570,11 +631,11 @@ export function fighterAdapterPlayer(player) {
     get alive() { return player.alive; },
     get hp() { return player.hp; },
     get role() { return player.role; },
+    get downed() { return false; }, // player has no downed state
     get bodyMesh() { return null; },
-    isSelf(other) { return false; },
+    isSelf(_other) { return false; },
     getPos() { return player.position.clone(); },
-    takeDamage(d, game, head) { player.takeDamage(d, game); },
-    heal(amount) { player.hp = Math.min(PLAYER_HP, player.hp + amount); },
+    takeDamage(d, game) { player.takeDamage(d, game); },
   };
 }
 
@@ -585,10 +646,10 @@ export function fighterAdapterBot(bot) {
     get alive() { return bot.alive; },
     get hp() { return bot.hp; },
     get role() { return bot.role; },
+    get downed() { return bot.downed; },
     get bodyMesh() { return bot.bodyMesh; },
     isSelf(other) { return other === bot; },
     getPos() { return bot.getPos(); },
     takeDamage(d, game, head) { bot.takeDamage(d, game, head); },
-    heal(amount) { bot.heal(amount); },
   };
 }

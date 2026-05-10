@@ -68,13 +68,10 @@ export function tickShooter(s, dt) {
     s.reloading -= dt;
     if (s.reloading <= 0) {
       s.reloading = 0;
-      const g = activeGun(s);
-      const need = g.mag - s.ammo[s.activeSlot];
-      const take = Math.min(need, s.reserve[s.activeSlot] * g.mag); // reserve is whole mags
-      // Simpler: consume one whole reserve mag
+      // Consume one whole reserve mag (drop-mag style — partial ammo is discarded).
       if (s.reserve[s.activeSlot] > 0) {
         s.reserve[s.activeSlot] -= 1;
-        s.ammo[s.activeSlot] = g.mag;
+        s.ammo[s.activeSlot] = activeGun(s).mag;
       }
     }
   }

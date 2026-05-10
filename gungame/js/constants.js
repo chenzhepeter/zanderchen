@@ -3,12 +3,13 @@ export const HOUSE_HP = 500;
 export const PLAYER_HP = 100;
 export const TEAM_SIZE = 5;
 export const RESPAWN_TIME = 6;
-export const PLAYER_RESPAWN_TIME = 5;
-export const DOWN_BLEEDOUT = 15;
-export const REVIVE_TIME = 3;
-export const HEAL_PER_SEC = 24;
-export const HEAL_RANGE = 5;
+export const PLAYER_RESPAWN_TIME = 6;
+export const DOWN_BLEEDOUT = 6;
+export const REVIVE_TIME = 1;
+export const REVIVE_HP_FRAC = 0.8;
 export const REVIVE_RANGE = 2.5;
+export const HEAL_RANGE = 4;
+export const MEDIC_HEAL_PER_VISIT = 20;
 export const HEADSHOT_MULT = 2;
 export const HOUSE_DAMAGE_FACTOR = 0.5;
 
@@ -27,7 +28,7 @@ export const HOUSE_POS = {
   [TEAM_BLUE]: { x: 0, z: 65 },
   [TEAM_RED]:  { x: 0, z: -65 },
 };
-export const HOUSE_SIZE = { w: 18, h: 7, d: 14 };
+export const HOUSE_SIZE = { w: 18, h: 5, d: 14 };
 
 // Gun ids
 export const GUN_PISTOL = 0;
