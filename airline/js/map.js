@@ -2,10 +2,10 @@ import { state } from './state.js';
 import { CITIES, CITY_BY_ID } from './data/cities.js';
 
 // === Mercator 投影 ===
-// viewBox: 1000 × 500，可视纬度窗 [-58, 78]，但投影不强制 clamp——
-// 让 SVG viewBox 自然裁剪，保持极地多边形几何完整不产生贴边锯齿。
+// viewBox: 1000 × 500，可视纬度窗 [-72, 80]——包含南极洲北缘与格陵兰。
+// 投影不强制 clamp，让 SVG viewBox 自然裁剪，保持极地多边形几何完整。
 const VIEW_W = 1000, VIEW_H = 500;
-const VIS_LAT_MIN = -58, VIS_LAT_MAX = 78;
+const VIS_LAT_MIN = -72, VIS_LAT_MAX = 80;
 
 function mercY(lat) {
   // 仅在数学奇点附近 clamp，避免 log(0) 出 NaN
@@ -112,25 +112,7 @@ export function buildMapSvg(el) {
     x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: '#b8d8e8',
   }));
 
-  // 经纬网
-  const grat = svgEl('g', { id: 'graticule' });
-  for (let lat = -60; lat <= 75; lat += 15) {
-    const { y } = project(0, lat);
-    grat.appendChild(svgEl('line', {
-      x1: 0, x2: VIEW_W, y1: y, y2: y,
-      stroke: '#ffffff', 'stroke-opacity': 0.4, 'stroke-width': 0.6,
-    }));
-  }
-  for (let lng = -180; lng <= 180; lng += 30) {
-    const { x } = project(lng, 0);
-    grat.appendChild(svgEl('line', {
-      x1: x, x2: x, y1: 0, y2: VIEW_H,
-      stroke: '#ffffff', 'stroke-opacity': 0.4, 'stroke-width': 0.6,
-    }));
-  }
-  el.appendChild(grat);
-
-  // 陆地层 (先用 fallback，加载好后会重绘)
+  // 陆地层 (先用 fallback，CDN 加载完成后会重绘)
   const landLayer = svgEl('g', { id: 'map-land' });
   el.appendChild(landLayer);
   drawLand(el);
@@ -146,17 +128,20 @@ export function drawLand(el) {
   layer.innerHTML = '';
 
   if (landPolygons) {
-    // 用真实 TopoJSON 数据
-    const pathData = polygonsToPath(landPolygons);
-    layer.appendChild(svgEl('path', {
-      d: pathData,
-      fill: '#e7eddc',
-      stroke: '#9aae89',
-      'stroke-width': 0.5,
-      'stroke-linejoin': 'round',
-    }));
+    // 每个多边形一条 <path>，配合 fill-rule="evenodd" 正确呈现外环+空洞
+    for (const poly of landPolygons) {
+      const d = polygonToPath(poly);
+      if (!d) continue;
+      layer.appendChild(svgEl('path', {
+        d,
+        fill: '#e7eddc',
+        'fill-rule': 'evenodd',
+        stroke: '#9aae89',
+        'stroke-width': 0.4,
+        'stroke-linejoin': 'round',
+      }));
+    }
   } else {
-    // 兜底
     layer.appendChild(svgEl('path', {
       d: FALLBACK_LAND,
       fill: '#e7eddc',
@@ -166,17 +151,16 @@ export function drawLand(el) {
   }
 }
 
-function polygonsToPath(polys) {
+// 一个多边形（外环 + 0..N 内环空洞）→ 一条 path 数据
+function polygonToPath(poly) {
   const parts = [];
-  for (const poly of polys) {
-    for (const ring of poly) {
-      if (ring.length === 0) continue;
-      const pts = ring.map(([lng, lat]) => {
-        const p = project(lng, lat);
-        return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
-      });
-      parts.push('M' + pts.join('L') + 'Z');
-    }
+  for (const ring of poly) {
+    if (!ring || ring.length === 0) continue;
+    const pts = ring.map(([lng, lat]) => {
+      const p = project(lng, lat);
+      return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    });
+    parts.push('M' + pts.join('L') + 'Z');
   }
   return parts.join(' ');
 }
