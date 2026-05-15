@@ -1,4 +1,4 @@
-import { state } from './state.js';
+import { state, AD_TIERS } from './state.js';
 import { CITY_BY_ID, distanceKm } from './data/cities.js';
 import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
@@ -167,11 +167,11 @@ export function simulateQuarterOperations() {
       // 价格弹性: 玩家或 AI 设的 fare 与 baseFare 之比
       const baseFare = 60 + dist * 0.08;
       const fareIndex = clamp(baseFare / Math.max(20, r.fare), 0.35, 1.6);
-      const serviceBoost = 1 + (r.serviceLevel - 2) * 0.10; // 等级 1/2/3 -> 0.9/1.0/1.1
-      const adBoost = 1 + Math.log10(1 + r.adSpend / 1e6) * 0.05;
+      const adCfg = AD_TIERS[r.adTier || 'none'] || AD_TIERS.none;
+      const adBoost = adCfg.boost;
       const prestigeBoost = 1 + (al.prestige - 50) * 0.001;
 
-      const attractiveness = fareIndex * serviceBoost * adBoost * prestigeBoost;
+      const attractiveness = fareIndex * adBoost * prestigeBoost;
       // 本航司在该城市对的运力占比
       const totalPairCap = pairTotals[info.key].totalSeats;
       const myShare = cap / totalPairCap;
@@ -195,10 +195,10 @@ export function simulateQuarterOperations() {
       // 为简化，下面所有"乘客×单价"已使每条短航线收入约 0.5-3 百万 量级
       // landingFee 用 dist 与 size 折算到百万
       const landingCostM = flights * (5 + (from.size + to.size)) / 1000; // 每架次几千美元 → 百万级
-      // 服务 / 餐食
-      const serviceCostM = passengers * (10 + r.serviceLevel * 8) / 1000_000; // 美元/座 → 百万
-      // 广告也是支出
-      const adCostM = r.adSpend / 1e6;
+      // 客舱服务 (固定档次，不再可调)
+      const serviceCostM = passengers * 22 / 1e6;
+      // 广告 (枚举三档)
+      const adCostM = adCfg.cost / 1e6;
 
       // 永久性事件成本 (9/11 后的安保 +8/座)
       let safetyCostM = 0;
@@ -438,7 +438,7 @@ export function sellAircraft(airline, uid) {
   return { ok: true, resale };
 }
 
-export function openRoute(airline, fromCity, toCity, fare, serviceLevel = 2) {
+export function openRoute(airline, fromCity, toCity, fare, aircraftUid = null) {
   if (fromCity === toCity) return { ok: false, msg: '起降城市不能相同' };
   if (!airline.landingRights.includes(fromCity)) return { ok: false, msg: `没有 ${fromCity} 着陆权` };
   if (!airline.landingRights.includes(toCity))   return { ok: false, msg: `没有 ${toCity} 着陆权` };
@@ -446,18 +446,32 @@ export function openRoute(airline, fromCity, toCity, fare, serviceLevel = 2) {
     (r.fromCity === fromCity && r.toCity === toCity) ||
     (r.fromCity === toCity   && r.toCity === fromCity));
   if (exists) return { ok: false, msg: '该城市对你已开通' };
-  airline.routes.push({
+  const dist = distanceKm(CITY_BY_ID[fromCity], CITY_BY_ID[toCity]);
+  // 若指定飞机，需验证航程
+  let ac = null;
+  if (aircraftUid) {
+    ac = airline.aircraft.find(a => a.uid === aircraftUid);
+    if (!ac) return { ok: false, msg: '飞机不存在' };
+    if (ac.routeId) return { ok: false, msg: '该飞机已分配到其他航线' };
+    const m = AIRCRAFT_BY_ID[ac.modelId];
+    if (m.rangeKm < dist) return { ok: false, msg: `${m.name} 航程不足（${m.rangeKm}km < ${dist}km）` };
+  }
+  const newRoute = {
     id: `r${Date.now()}${Math.floor(Math.random()*999)}`,
     ownerId: airline.id,
     fromCity, toCity,
-    fare: fare || Math.round(60 + distanceKm(CITY_BY_ID[fromCity], CITY_BY_ID[toCity]) * 0.08),
-    serviceLevel,
-    adSpend: 0,
+    fare: fare || Math.round(60 + dist * 0.08),
+    adTier: 'none',
     assignedAircraft: [],
     lastLoadFactor: 0,
     lastProfit: 0,
-  });
-  return { ok: true };
+  };
+  airline.routes.push(newRoute);
+  if (ac) {
+    ac.routeId = newRoute.id;
+    newRoute.assignedAircraft.push(ac.uid);
+  }
+  return { ok: true, route: newRoute };
 }
 
 export function closeRoute(airline, routeId) {
@@ -513,16 +527,29 @@ export function setFare(airline, routeId, fare) {
   return { ok: true };
 }
 
-export function setServiceLevel(airline, routeId, level) {
+export function setAdTier(airline, routeId, tier) {
   const r = airline.routes.find(x => x.id === routeId);
   if (!r) return { ok: false };
-  r.serviceLevel = Math.max(1, Math.min(3, level | 0));
+  if (!AD_TIERS[tier]) return { ok: false, msg: '广告档位无效' };
+  r.adTier = tier;
   return { ok: true };
 }
 
-export function setAdSpend(airline, routeId, spendMillion) {
-  const r = airline.routes.find(x => x.id === routeId);
-  if (!r) return { ok: false };
-  r.adSpend = Math.max(0, spendMillion * 1e6);
-  return { ok: true };
+// 估算每位乘客的盈亏平衡票价
+// 计入：燃油（按平均 0.03L/座km）、着陆 + 客舱服务 + 维护分摊
+// fuelPrice 为当前油价倍率，结果为 USD/passenger
+export function computeBreakEvenFare(airline, route) {
+  const a = CITY_BY_ID[route.fromCity], b = CITY_BY_ID[route.toCity];
+  const dist = distanceKm(a, b);
+  // 燃油: dist km × 0.03 L/seat-km × 0.6 USD/L × fuelPrice
+  const fuelPerSeat = dist * 0.03 * 0.6 * state.fuelPrice;
+  // 着陆 & 服务 & 维护分摊
+  const opPerSeat = 25 + (a.size + b.size) * 2;
+  return Math.max(20, Math.round(fuelPerSeat + opPerSeat));
+}
+
+// 推荐默认票价：盈亏平衡 × 1.6 (留 ~60% 毛利空间)
+export function recommendedFare(airline, route) {
+  const be = computeBreakEvenFare(airline, route);
+  return Math.round(be * 1.6);
 }

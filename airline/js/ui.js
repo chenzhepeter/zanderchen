@@ -1,4 +1,8 @@
-import { state, getPlayer, saveGame, loadGame, clearSave, hasSave, initNewGame } from './state.js';
+import {
+  state, getPlayer, saveGame, loadGame, clearSave, hasSave, initNewGame,
+  saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, NUM_SLOTS,
+  AD_TIERS, logPlayerAction, clearTurnActions,
+} from './state.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
 import { AIRCRAFT, AIRCRAFT_BY_ID } from './data/aircraft.js';
 import { AIRLINES } from './data/airlines.js';
@@ -6,8 +10,8 @@ import { EVENTS } from './data/events.js';
 import {
   advanceQuarter, applyChoiceOption,
   buyAircraft, sellAircraft, openRoute, closeRoute,
-  assignAircraftToRoute, setFare, setServiceLevel, setAdSpend,
-  applyForLanding,
+  assignAircraftToRoute, setFare, setAdTier,
+  applyForLanding, computeBreakEvenFare, recommendedFare,
 } from './sim.js';
 import { runAiTurn } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
@@ -17,15 +21,11 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 let currentTab = 'routes';
+let cityTabSort = { col: 'region', dir: 'asc' };
 
 export function bootUi() {
   buildShell();
-  // 启动: 优先尝试加载存档
-  if (hasSave() && loadGame()) {
-    showGameView();
-  } else {
-    showStartScreen();
-  }
+  showStartScreen();
 }
 
 function buildShell() {
@@ -33,7 +33,10 @@ function buildShell() {
   app.innerHTML = `
     <div id="start-screen" class="screen"></div>
     <div id="game-screen" class="screen" hidden>
-      <header id="hud" class="hud"></header>
+      <header id="top-bar" class="top-bar">
+        <button id="menu-btn" class="menu-btn" aria-label="菜单">⚙️</button>
+        <div id="hud" class="hud"></div>
+      </header>
       <section id="map-wrap" class="map-wrap">
         <svg id="world-map" xmlns="http://www.w3.org/2000/svg"></svg>
       </section>
@@ -47,18 +50,14 @@ function buildShell() {
         <button class="tab" data-tab="intel">情报</button>
       </nav>
       <section id="tab-body" class="tab-body"></section>
-      <div id="action-bar" class="action-bar">
-        <button id="end-turn-btn" class="primary-btn">结束季度 →</button>
-        <button id="save-btn" class="ghost-btn">保存</button>
-        <button id="menu-btn" class="ghost-btn">菜单</button>
+      <div class="end-turn-area">
+        <button id="end-turn-btn" class="primary-btn big">结束季度 →</button>
       </div>
     </div>
     <div id="modal-root"></div>
     <div id="toast"></div>
   `;
-  // 全局事件代理
-  $('#end-turn-btn').addEventListener('click', onEndTurn);
-  $('#save-btn').addEventListener('click', () => { saveGame(); toast('已保存'); });
+  $('#end-turn-btn').addEventListener('click', onEndTurnConfirm);
   $('#menu-btn').addEventListener('click', openMenu);
   $$('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
 }
@@ -68,11 +67,33 @@ function showStartScreen() {
   $('#start-screen').hidden = false;
   $('#game-screen').hidden = true;
   const root = $('#start-screen');
+  const slots = listSaveSlots();
+  const hasAutoSave = hasSave();
+  const hasAnyManual = slots.some(s => s !== null);
+
   root.innerHTML = `
     <div class="start-card">
       <h1>✈️ 航空霸业 Lite</h1>
       <p class="subtitle">2000 → 2030 · 30 年航线经营沙盘</p>
-      <p class="hint">选一家航司接手，亲历 21 世纪初的航空业大事件：9/11、SARS、金融危机、火山灰、新冠、电动与超音速复兴……</p>
+      <p class="hint">选一家航司接手，亲历 21 世纪初的航空业大事件：9/11、SARS、金融危机、火山灰、新冠、超音速复兴⋯</p>
+      <div class="start-actions">
+        <button class="primary-btn big" id="new-game-btn">🎮 开始新游戏</button>
+        ${hasAutoSave ? '<button class="ghost-btn big" id="continue-btn">📂 继续上次（自动存档）</button>' : ''}
+        ${hasAnyManual ? '<button class="ghost-btn big" id="load-game-btn">💾 读取存档</button>' : ''}
+      </div>
+    </div>
+  `;
+  $('#new-game-btn').addEventListener('click', showAirlinePicker);
+  if (hasAutoSave) $('#continue-btn').addEventListener('click', () => { loadGame(); showGameView(); });
+  if (hasAnyManual) $('#load-game-btn').addEventListener('click', showLoadSlotsScreen);
+}
+
+function showAirlinePicker() {
+  const root = $('#start-screen');
+  root.innerHTML = `
+    <div class="start-card">
+      <h1>✈️ 选择你接手的航司</h1>
+      <p class="hint">点选一家航司，开始 2000 Q1 的新游戏。</p>
       <div class="airline-pick">
         ${AIRLINES.map(a => `
           <button class="airline-card" data-id="${a.id}" style="--c:${a.color}">
@@ -81,13 +102,13 @@ function showStartScreen() {
             <div class="hub">主基地 ${CITY_BY_ID[a.hubCity].nameZh} (${a.hubCity})</div>
             <div class="stats">
               <span>💰 $${a.initialCash}M</span>
-              <span>✈️ ${a.initialFleet.reduce((s,f)=>s+f.count,0)} 架</span>
+              <span>✈️ ${a.initialFleet.reduce((s, f) => s + f.count, 0)} 架</span>
               <span>⭐ 声望 ${a.initialPrestige}</span>
             </div>
           </button>
         `).join('')}
       </div>
-      ${hasSave() ? '<button id="continue-btn" class="ghost-btn">继续上次存档</button>' : ''}
+      <button class="ghost-btn" id="back-to-start">← 返回</button>
     </div>
   `;
   $$('.airline-card', root).forEach(b => {
@@ -95,12 +116,82 @@ function showStartScreen() {
       initNewGame(b.dataset.id);
       saveGame();
       showGameView();
-      // 首次进入引导
       showTutorialModal();
     });
   });
-  const cont = $('#continue-btn', root);
-  if (cont) cont.addEventListener('click', () => { loadGame(); showGameView(); });
+  $('#back-to-start').addEventListener('click', showStartScreen);
+}
+
+function showLoadSlotsScreen() {
+  const root = $('#start-screen');
+  const slots = listSaveSlots();
+  root.innerHTML = `
+    <div class="start-card">
+      <h1>💾 读取存档</h1>
+      <p class="hint">浏览器最多保存 5 个手动存档，选择要读取的槽位。</p>
+      <div class="slot-list">
+        ${slots.map((s, i) => slotCardHtml(s, i + 1, 'load')).join('')}
+      </div>
+      <button class="ghost-btn" id="back-to-start">← 返回</button>
+    </div>
+  `;
+  attachSlotHandlers(root, 'load');
+  $('#back-to-start').addEventListener('click', showStartScreen);
+}
+
+function slotCardHtml(meta, slot, mode) {
+  if (!meta) {
+    return `<div class="slot-card empty">
+      <div class="slot-num">槽 ${slot}</div>
+      <div class="slot-info">空槽位</div>
+      ${mode === 'save'
+        ? `<button class="primary-btn small" data-slot="${slot}" data-act="save">保存到此</button>`
+        : `<button class="ghost-btn small" disabled>无存档</button>`}
+    </div>`;
+  }
+  const date = new Date(meta.savedAt);
+  const dateStr = `${date.getMonth() + 1}-${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return `<div class="slot-card">
+    <div class="slot-num">槽 ${slot}</div>
+    <div class="slot-info">
+      <b>${escapeHtml(meta.airlineName)}</b> · ${meta.year} Q${meta.quarter}<br>
+      <span class="muted">航线 ${meta.routes} · 现金 $${meta.cash.toFixed(0)}M · 存于 ${dateStr}</span>
+    </div>
+    <div class="slot-actions">
+      ${mode === 'save'
+        ? `<button class="primary-btn small" data-slot="${slot}" data-act="save">覆盖</button>`
+        : `<button class="primary-btn small" data-slot="${slot}" data-act="load">读取</button>`}
+      <button class="ghost-btn small" data-slot="${slot}" data-act="delete">删除</button>
+    </div>
+  </div>`;
+}
+
+function attachSlotHandlers(root, mode) {
+  $$('[data-act]', root).forEach(b => {
+    b.addEventListener('click', () => {
+      const slot = parseInt(b.dataset.slot, 10);
+      const act = b.dataset.act;
+      if (act === 'save') {
+        saveToSlot(slot);
+        toast(`已保存到槽 ${slot}`);
+        // 重新渲染槽位
+        if (mode === 'save') openMenu();  // refresh menu
+        else showLoadSlotsScreen();
+      } else if (act === 'load') {
+        if (!confirm(`读取槽 ${slot} 的存档？当前未保存的进度将丢失。`)) return;
+        if (loadFromSlot(slot)) {
+          saveGame();  // 同步到 auto-save
+          showGameView();
+          toast(`已读取槽 ${slot}`);
+        } else toast('读取失败');
+      } else if (act === 'delete') {
+        if (!confirm(`删除槽 ${slot} 的存档？`)) return;
+        deleteSlot(slot);
+        if (mode === 'save') openMenu();
+        else showLoadSlotsScreen();
+      }
+    });
+  });
 }
 
 function showGameView() {
@@ -108,7 +199,6 @@ function showGameView() {
   $('#game-screen').hidden = false;
   buildMapSvg($('#world-map'));
   rerender();
-  // 启动时若有 pendingEvent，弹出
   if (state.pendingEvent) showEventChoice(state.pendingEvent);
   else if (state.pendingDialog) showQuarterReport();
 }
@@ -120,11 +210,11 @@ function showTutorialModal() {
     body: `
       <p>你是 <b>${player.nameZh}</b> 的新任 CEO。本游戏共 <b>120 季度（2000 Q1 → 2030 Q4）</b>。</p>
       <ol style="padding-left:1.2em; line-height:1.7">
-        <li><b>地图</b>顶部是世界地图，蓝色弧线是你的航线，其它颜色是 3 家 AI 对手。</li>
-        <li><b>标签页</b>从左到右：航线 / 机队 / 城市 / 财报 / 排行 / 事件历史。</li>
-        <li>用 <b>城市</b> 标签申请着陆权，<b>航线</b> 标签开通新航线，<b>机队</b> 标签买飞机。</li>
-        <li>点 <b>结束季度</b> 推进时间。每季都可能发生历史事件，留意决策弹窗。</li>
-        <li>目标：到 2030 Q4 比 3 家对手积累更多的总资产 + 声望。</li>
+        <li>地图上你的航线是蓝色弧线，3 个 AI 对手是其他颜色。</li>
+        <li>用 <b>城市</b> 标签申请新着陆权，<b>航线</b> 标签开通新航线，<b>机队</b> 标签买/卖飞机。</li>
+        <li>票价用拖动条调整：靠左红色（亏损）→ 黄色（盈亏平衡）→ 右绿色（高利润）。</li>
+        <li>左上 ⚙️ 菜单可保存到 5 个槽位、读取存档或回到首页。</li>
+        <li>底部 <b>结束季度</b> 推进时间，会先弹窗确认本季操作。</li>
       </ol>
     `,
     actions: [{ label: '开始游戏', primary: true, onClick: closeModal }],
@@ -134,15 +224,14 @@ function showTutorialModal() {
 // ===== Render =====
 export function rerender() {
   renderHud();
-  drawMapContents($('#world-map'), { onCityClick: onCityClickMap });
+  drawMapContents($('#world-map'), { onCityClick: c => { setTab('cities'); showCityRoutes(c.id); } });
   renderTabs();
   renderTabBody();
 }
 
 function renderHud() {
   const p = getPlayer();
-  const hud = $('#hud');
-  hud.innerHTML = `
+  $('#hud').innerHTML = `
     <div class="hud-left">
       <span class="qtag">${state.year} Q${state.quarter}</span>
       <span class="al-name" style="color:${p.color}">${p.nameZh}</span>
@@ -161,11 +250,7 @@ function renderHud() {
 function renderTabs() {
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === currentTab));
 }
-function setTab(tab) {
-  currentTab = tab;
-  renderTabs();
-  renderTabBody();
-}
+function setTab(tab) { currentTab = tab; renderTabs(); renderTabBody(); }
 
 function renderTabBody() {
   const body = $('#tab-body');
@@ -185,26 +270,65 @@ function renderRoutes() {
   const rows = p.routes.map(r => {
     const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
     const dist = distanceKm(a, b);
-    const assigned = r.assignedAircraft.length;
+    const breakEven = computeBreakEvenFare(p, r);
+    const fareMin = Math.max(20, Math.round(breakEven * 0.5));
+    const fareMax = Math.max(fareMin + 50, Math.round(breakEven * 2.6));
+    const bePct = ((breakEven - fareMin) / (fareMax - fareMin)) * 100;
+    const fareCur = r.fare;
+
+    // 已分配 + 候选闲置兼容飞机
+    const assignedHtml = r.assignedAircraft.map(uid => {
+      const ac = p.aircraft.find(x => x.uid === uid);
+      if (!ac) return '';
+      const m = AIRCRAFT_BY_ID[ac.modelId];
+      return `<span class="ac-chip">
+        <span>${m.name}</span>
+        <button class="x-btn" data-route="${r.id}" data-uid="${uid}" data-act="unassign" title="改为闲置">×</button>
+      </span>`;
+    }).join('');
+
+    const idleCompat = p.aircraft.filter(ac =>
+      !ac.routeId && !ac.grounded && AIRCRAFT_BY_ID[ac.modelId].rangeKm >= dist
+    );
+    const addBtn = idleCompat.length > 0
+      ? `<select class="add-ac" data-route="${r.id}">
+          <option value="">+ 加飞机</option>
+          ${idleCompat.map(ac => {
+            const m = AIRCRAFT_BY_ID[ac.modelId];
+            return `<option value="${ac.uid}">${m.name} (${m.rangeKm}km)</option>`;
+          }).join('')}
+        </select>`
+      : `<span class="muted small">无兼容空闲</span>`;
+
     return `
       <tr data-route="${r.id}">
-        <td>${a.nameZh} — ${b.nameZh}<br><span class="muted">${dist} km</span></td>
-        <td><input type="number" class="r-fare" min="20" value="${r.fare}" /></td>
         <td>
-          <select class="r-svc">
-            <option value="1" ${r.serviceLevel===1?'selected':''}>经济</option>
-            <option value="2" ${r.serviceLevel===2?'selected':''}>标准</option>
-            <option value="3" ${r.serviceLevel===3?'selected':''}>豪华</option>
+          <div class="route-name">${a.nameZh} — ${b.nameZh}</div>
+          <div class="muted small">${dist} km · 盈亏价 $${breakEven}</div>
+        </td>
+        <td class="fare-cell">
+          <div class="fare-slider-wrap" style="--be-pos:${bePct}%">
+            <input type="range" class="fare-slider"
+              min="${fareMin}" max="${fareMax}" value="${fareCur}" data-route="${r.id}" />
+          </div>
+          <div class="fare-label">
+            <span class="fare-val">$${fareCur}</span>
+            <span class="muted small">范围 $${fareMin}–${fareMax}</span>
+          </div>
+        </td>
+        <td>
+          <select class="r-ad" data-route="${r.id}">
+            ${Object.entries(AD_TIERS).map(([k, t]) =>
+              `<option value="${k}" ${r.adTier === k ? 'selected' : ''}>${t.label}</option>`).join('')}
           </select>
         </td>
-        <td><input type="number" class="r-ad" min="0" step="0.5" value="${(r.adSpend/1e6).toFixed(1)}" title="百万美元" />M</td>
-        <td>${assigned}</td>
-        <td>${r.lastLoadFactor ? (r.lastLoadFactor*100).toFixed(0) + '%' : '—'}</td>
-        <td class="${r.lastProfit>=0?'pos':'neg'}">$${fmt(r.lastProfit)}M</td>
-        <td>
-          <button class="mini r-save">保存</button>
-          <button class="mini r-close">关闭</button>
+        <td class="ac-cell">
+          <div class="ac-list">${assignedHtml || '<span class="muted small">无飞机</span>'}</div>
+          ${addBtn}
         </td>
+        <td>${r.lastLoadFactor ? (r.lastLoadFactor * 100).toFixed(0) + '%' : '—'}</td>
+        <td class="${r.lastProfit >= 0 ? 'pos' : 'neg'}">$${fmt(r.lastProfit)}M</td>
+        <td><button class="mini r-close" data-route="${r.id}">关闭</button></td>
       </tr>`;
   }).join('');
   return `
@@ -213,34 +337,95 @@ function renderRoutes() {
         <h3>航线 (${p.routes.length})</h3>
         <button id="open-route-btn" class="primary-btn small">+ 开通新航线</button>
       </div>
-      <div class="table-wrap"><table class="game-table">
-        <thead><tr><th>城市对</th><th>票价 $</th><th>服务</th><th>广告</th><th>飞机</th><th>载荷</th><th>上季利润</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="muted">还没有航线，点右上方"开通新航线"。</td></tr>`}</tbody>
+      <div class="table-wrap"><table class="game-table routes-table">
+        <thead><tr>
+          <th>城市对</th>
+          <th>票价（拖动）</th>
+          <th>广告</th>
+          <th>飞机</th>
+          <th>载荷</th>
+          <th>上季利润</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="muted">还没有航线，点右上方"开通新航线"。</td></tr>`}</tbody>
       </table></div>
     </div>
   `;
 }
 
 function attachRouteHandlers() {
-  $$('#tab-body tr[data-route]').forEach(tr => {
-    const id = tr.dataset.route;
-    const p = getPlayer();
-    tr.querySelector('.r-save').addEventListener('click', () => {
-      const fare = parseFloat(tr.querySelector('.r-fare').value);
-      const svc = parseInt(tr.querySelector('.r-svc').value, 10);
-      const ad = parseFloat(tr.querySelector('.r-ad').value);
-      setFare(p, id, fare);
-      setServiceLevel(p, id, svc);
-      setAdSpend(p, id, ad);
-      toast('已保存航线设置');
-      rerender();
+  const p = getPlayer();
+  // 票价 slider
+  $$('.fare-slider').forEach(slider => {
+    const rid = slider.dataset.route;
+    const row = slider.closest('tr');
+    const label = row.querySelector('.fare-val');
+    slider.addEventListener('input', () => {
+      label.textContent = '$' + slider.value;
     });
-    tr.querySelector('.r-close').addEventListener('click', () => {
-      if (!confirm('确认关闭这条航线？飞机会变为闲置。')) return;
-      closeRoute(p, id);
+    slider.addEventListener('change', () => {
+      const oldFare = p.routes.find(r => r.id === rid)?.fare;
+      setFare(p, rid, parseInt(slider.value, 10));
+      const r = p.routes.find(x => x.id === rid);
+      logPlayerAction('fare', `调整 ${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata} 票价 $${oldFare} → $${r.fare}`);
+      saveGame();
+    });
+  });
+  // 广告档位
+  $$('.r-ad').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const rid = sel.dataset.route;
+      const r = p.routes.find(x => x.id === rid);
+      const old = r.adTier;
+      setAdTier(p, rid, sel.value);
+      logPlayerAction('ad', `${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata} 广告 ${AD_TIERS[old]?.label || old} → ${AD_TIERS[sel.value].label}`);
+      saveGame();
+    });
+  });
+  // 关闭航线
+  $$('.r-close').forEach(b => {
+    b.addEventListener('click', () => {
+      if (!confirm('关闭这条航线？飞机会变为闲置。')) return;
+      const rid = b.dataset.route;
+      const r = p.routes.find(x => x.id === rid);
+      const desc = `${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata}`;
+      closeRoute(p, rid);
+      logPlayerAction('close', `关闭航线 ${desc}`);
+      saveGame();
       rerender();
     });
   });
+  // 飞机取消分配
+  $$('.x-btn[data-act="unassign"]').forEach(b => {
+    b.addEventListener('click', () => {
+      const rid = b.dataset.route;
+      const uid = b.dataset.uid;
+      const r = p.routes.find(x => x.id === rid);
+      const ac = p.aircraft.find(a => a.uid === uid);
+      const m = AIRCRAFT_BY_ID[ac.modelId];
+      assignAircraftToRoute(p, uid, null);
+      logPlayerAction('unassign', `${m.name} 从 ${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata} 改为闲置`);
+      saveGame();
+      rerender();
+    });
+  });
+  // 飞机加入
+  $$('.add-ac').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const uid = sel.value;
+      if (!uid) return;
+      const rid = sel.dataset.route;
+      const r = p.routes.find(x => x.id === rid);
+      const ac = p.aircraft.find(a => a.uid === uid);
+      const m = AIRCRAFT_BY_ID[ac.modelId];
+      const res = assignAircraftToRoute(p, uid, rid);
+      if (!res.ok) { toast(res.msg); return; }
+      logPlayerAction('assign', `${m.name} 分配到 ${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata}`);
+      saveGame();
+      rerender();
+    });
+  });
+
   const openBtn = $('#open-route-btn');
   if (openBtn) openBtn.addEventListener('click', openNewRouteDialog);
 }
@@ -258,27 +443,53 @@ function openNewRouteDialog() {
       <div class="form-row"><label>终点</label>
         <select id="d-to">${rights.map(id => `<option value="${id}">${CITY_BY_ID[id].nameZh} (${id})</option>`).join('')}</select>
       </div>
-      <div id="d-info" class="muted">选择起降城市后将显示距离。</div>
+      <div id="d-info" class="muted">选择起降城市后将显示距离与可用机型。</div>
+      <div class="form-row"><label>飞机</label>
+        <select id="d-aircraft"><option value="">先选择起降城市</option></select>
+      </div>
     `,
     actions: [
       { label: '取消', onClick: closeModal },
       { label: '开通', primary: true, onClick: () => {
-          const from = $('#d-from').value, to = $('#d-to').value;
-          const res = openRoute(p, from, to);
-          if (!res.ok) { toast(res.msg); return; }
-          closeModal(); toast('已开通新航线'); rerender();
-      }},
+        const from = $('#d-from').value, to = $('#d-to').value;
+        const acUid = $('#d-aircraft').value;
+        if (!acUid) { toast('请选择一架空闲飞机'); return; }
+        const res = openRoute(p, from, to, null, acUid);
+        if (!res.ok) { toast(res.msg); return; }
+        const ac = p.aircraft.find(a => a.uid === acUid);
+        const m = AIRCRAFT_BY_ID[ac.modelId];
+        logPlayerAction('open', `开通 ${from}-${to}，分配 ${m.name}`);
+        saveGame();
+        closeModal(); toast('已开通新航线'); rerender();
+      } },
     ],
   });
-  const sync = () => {
-    const a = CITY_BY_ID[$('#d-from').value];
-    const b = CITY_BY_ID[$('#d-to').value];
-    if (!a || !b || a.id === b.id) { $('#d-info').textContent = '请选择不同的两个城市'; return; }
-    $('#d-info').innerHTML = `距离 <b>${distanceKm(a,b)} km</b> · 建议票价 $${Math.round(60+distanceKm(a,b)*0.08)}`;
+  const syncAircraft = () => {
+    const fromId = $('#d-from').value, toId = $('#d-to').value;
+    const sel = $('#d-aircraft');
+    const info = $('#d-info');
+    if (!fromId || !toId || fromId === toId) {
+      info.textContent = '请选择不同的两个城市';
+      sel.innerHTML = '<option value="">先选择起降城市</option>';
+      return;
+    }
+    const dist = distanceKm(CITY_BY_ID[fromId], CITY_BY_ID[toId]);
+    info.innerHTML = `距离 <b>${dist} km</b>`;
+    const idle = p.aircraft.filter(ac =>
+      !ac.routeId && !ac.grounded && AIRCRAFT_BY_ID[ac.modelId].rangeKm >= dist);
+    if (idle.length === 0) {
+      sel.innerHTML = '<option value="">无符合航程的闲置飞机</option>';
+      info.innerHTML += ` · <span class="warn">⚠️ 当前无空闲飞机能飞此距离，先到机队购买或释放飞机</span>`;
+    } else {
+      sel.innerHTML = idle.map(ac => {
+        const m = AIRCRAFT_BY_ID[ac.modelId];
+        return `<option value="${ac.uid}">${m.name} · ${m.capacity}座 · ${m.rangeKm}km</option>`;
+      }).join('');
+    }
   };
-  $('#d-from').addEventListener('change', sync);
-  $('#d-to').addEventListener('change', sync);
-  sync();
+  $('#d-from').addEventListener('change', syncAircraft);
+  $('#d-to').addEventListener('change', syncAircraft);
+  syncAircraft();
 }
 
 // ----- 机队 -----
@@ -287,17 +498,28 @@ function renderFleet() {
   const rows = p.aircraft.map(ac => {
     const m = AIRCRAFT_BY_ID[ac.modelId];
     const route = ac.routeId ? p.routes.find(r => r.id === ac.routeId) : null;
-    const routeLabel = route ? `${CITY_BY_ID[route.fromCity].iata}—${CITY_BY_ID[route.toCity].iata}` : '闲置';
+    let routeLabel = '<span class="muted">闲置</span>';
+    if (ac.grounded) {
+      routeLabel = '<span class="bad">停飞</span>';
+    } else if (route) {
+      const a = CITY_BY_ID[route.fromCity], b = CITY_BY_ID[route.toCity];
+      const dist = distanceKm(a, b);
+      const fits = m.rangeKm >= dist;
+      routeLabel = `${a.iata}—${b.iata} <span class="muted small">${dist}km</span>${!fits ? ' <span class="bad">航程不足</span>' : ''}`;
+    }
+    const routeOptions = p.routes
+      .filter(r => m.rangeKm >= distanceKm(CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity]))
+      .map(r => `<option value="${r.id}" ${r.id === ac.routeId ? 'selected' : ''}>${CITY_BY_ID[r.fromCity].iata}—${CITY_BY_ID[r.toCity].iata}</option>`).join('');
     return `
       <tr data-uid="${ac.uid}">
-        <td>${m.name}<br><span class="muted">${m.manufacturer}</span></td>
-        <td>${m.capacity} 座 · ${m.rangeKm} km</td>
-        <td>${(ac.ageQuarters/4).toFixed(1)} 年</td>
-        <td>${ac.grounded ? '<span class="bad">停飞</span>' : routeLabel}</td>
+        <td>${m.name}<br><span class="muted small">${m.manufacturer}</span></td>
+        <td>${m.capacity} 座<br><span class="muted small">航程 ${m.rangeKm}km</span></td>
+        <td>${(ac.ageQuarters / 4).toFixed(1)} 年</td>
+        <td>${routeLabel}</td>
         <td>
           <select class="a-assign">
             <option value="">— 闲置 —</option>
-            ${p.routes.map(r => `<option value="${r.id}" ${r.id===ac.routeId?'selected':''}>${CITY_BY_ID[r.fromCity].iata}—${CITY_BY_ID[r.toCity].iata}</option>`).join('')}
+            ${routeOptions}
           </select>
           <button class="mini a-apply">分配</button>
           <button class="mini a-sell">售出</button>
@@ -311,7 +533,7 @@ function renderFleet() {
         <button id="buy-aircraft-btn" class="primary-btn small">+ 购买飞机</button>
       </div>
       <div class="table-wrap"><table class="game-table">
-        <thead><tr><th>机型</th><th>规格</th><th>机龄</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>机型</th><th>规格</th><th>机龄</th><th>当前任务</th><th>操作</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="muted">机队为空，先去购买飞机。</td></tr>'}</tbody>
       </table></div>
     </div>
@@ -326,12 +548,28 @@ function attachFleetHandlers() {
       const rid = tr.querySelector('.a-assign').value || null;
       const res = assignAircraftToRoute(p, uid, rid);
       if (!res.ok) { toast(res.msg); return; }
-      toast(rid ? '已分配' : '已设为闲置'); rerender();
+      const ac = p.aircraft.find(a => a.uid === uid);
+      const m = AIRCRAFT_BY_ID[ac.modelId];
+      if (rid) {
+        const r = p.routes.find(x => x.id === rid);
+        logPlayerAction('assign', `${m.name} 分配到 ${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata}`);
+      } else {
+        logPlayerAction('unassign', `${m.name} 改为闲置`);
+      }
+      saveGame();
+      toast(rid ? '已分配' : '已设为闲置');
+      rerender();
     });
     tr.querySelector('.a-sell').addEventListener('click', () => {
       if (!confirm('确认出售？将按折旧价回收。')) return;
+      const ac = p.aircraft.find(a => a.uid === uid);
+      const m = AIRCRAFT_BY_ID[ac.modelId];
       const r = sellAircraft(p, uid);
-      if (r.ok) toast(`已售出，回收 $${fmt(r.resale)}M`);
+      if (r.ok) {
+        toast(`已售出，回收 $${fmt(r.resale)}M`);
+        logPlayerAction('sell', `出售 ${m.name}，回收 $${r.resale.toFixed(1)}M`);
+        saveGame();
+      }
       rerender();
     });
   });
@@ -349,7 +587,7 @@ function openBuyAircraftDialog() {
         <thead><tr><th>机型</th><th>载量</th><th>航程</th><th>油耗</th><th>价格</th><th></th></tr></thead>
         <tbody>${available.map(m => `
           <tr>
-            <td><b>${m.name}</b><br><span class="muted">${m.manufacturer}</span></td>
+            <td><b>${m.name}</b><br><span class="muted small">${m.manufacturer}</span></td>
             <td>${m.capacity}</td>
             <td>${m.rangeKm} km</td>
             <td>${m.fuelPerSeatKm.toFixed(3)} L/座km</td>
@@ -362,9 +600,13 @@ function openBuyAircraftDialog() {
   });
   $$('.buy-this').forEach(b => b.addEventListener('click', () => {
     const p = getPlayer();
+    const m = AIRCRAFT_BY_ID[b.dataset.id];
     const r = buyAircraft(p, b.dataset.id);
     if (!r.ok) { toast(r.msg); return; }
-    toast('已购买，新飞机已加入机队'); rerender();
+    logPlayerAction('buy', `购入 ${m.name} ($${m.purchasePrice}M)`);
+    saveGame();
+    toast('已购买');
+    rerender();
   }));
 }
 
@@ -372,45 +614,129 @@ function openBuyAircraftDialog() {
 function renderCities() {
   const p = getPlayer();
   const rights = new Set(p.landingRights);
-  const queued = new Set(state.landingApplications.filter(a=>a.airlineId===p.id).map(a=>a.cityId));
-  const rows = CITIES.map(c => {
-    const status = rights.has(c.id) ? '<span class="pos">✓ 已拥有</span>' :
-                   queued.has(c.id) ? `<span class="warn">审批中</span>` :
-                   `<button class="mini apply-btn" data-id="${c.id}">申请</button>`;
+  const queued = new Set(state.landingApplications.filter(a => a.airlineId === p.id).map(a => a.cityId));
+
+  // 排序
+  const rows = [...CITIES];
+  const sortFn = (() => {
+    const dir = cityTabSort.dir === 'desc' ? -1 : 1;
+    switch (cityTabSort.col) {
+      case 'name': return (a, b) => dir * a.nameZh.localeCompare(b.nameZh, 'zh');
+      case 'region': return (a, b) => dir * (regionLabel(a.region).localeCompare(regionLabel(b.region), 'zh') || a.iata.localeCompare(b.iata));
+      case 'size': return (a, b) => dir * (a.size - b.size);
+      case 'demand': return (a, b) => dir * (a.baseDemand - b.baseDemand);
+      case 'status': return (a, b) => {
+        const sa = rights.has(a.id) ? 0 : queued.has(a.id) ? 1 : 2;
+        const sb = rights.has(b.id) ? 0 : queued.has(b.id) ? 1 : 2;
+        return dir * (sa - sb);
+      };
+      default: return () => 0;
+    }
+  })();
+  rows.sort(sortFn);
+
+  const headerCell = (col, label) => {
+    const active = cityTabSort.col === col;
+    const arrow = active ? (cityTabSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="sortable" data-col="${col}">${label}${arrow}</th>`;
+  };
+
+  const trs = rows.map(c => {
+    const status = rights.has(c.id) ? '<span class="pos">✓ 已拥有</span>'
+      : queued.has(c.id) ? `<span class="warn">审批中</span>`
+        : `<button class="mini apply-btn" data-id="${c.id}">申请</button>`;
     return `
       <tr>
-        <td>${c.nameZh} <span class="muted">(${c.iata})</span></td>
+        <td><a href="#" class="city-link" data-id="${c.id}">${c.nameZh}</a> <span class="muted small">(${c.iata})</span></td>
         <td>${regionLabel(c.region)}</td>
         <td>${'★'.repeat(c.size)}</td>
         <td>${c.baseDemand}</td>
         <td>${status}</td>
       </tr>`;
   }).join('');
+
   return `
     <div class="panel">
       <div class="panel-head"><h3>城市与着陆权</h3>
         <span class="muted">已拥有 ${p.landingRights.length} / ${CITIES.length}</span>
       </div>
       <div class="table-wrap"><table class="game-table">
-        <thead><tr><th>城市</th><th>区域</th><th>规模</th><th>基础需求</th><th>状态</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <thead><tr>
+          ${headerCell('name', '城市')}
+          ${headerCell('region', '区域')}
+          ${headerCell('size', '规模')}
+          ${headerCell('demand', '基础需求')}
+          ${headerCell('status', '状态')}
+        </tr></thead>
+        <tbody>${trs}</tbody>
       </table></div>
-      <p class="muted small">申请着陆权需要 1–4 季审批，根据城市规模收取申请费。</p>
+      <p class="muted small">点击表头排序 · 点击城市名查看相关航线 · 申请着陆权需 1–4 季审批</p>
     </div>
   `;
 }
 
 function attachCitiesHandlers() {
+  $$('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (cityTabSort.col === col) cityTabSort.dir = cityTabSort.dir === 'asc' ? 'desc' : 'asc';
+      else { cityTabSort.col = col; cityTabSort.dir = 'asc'; }
+      renderTabBody();
+    });
+  });
   $$('.apply-btn').forEach(b => b.addEventListener('click', () => {
     const p = getPlayer();
+    const city = CITY_BY_ID[b.dataset.id];
     const r = applyForLanding(p, b.dataset.id);
     if (!r.ok) { toast(r.msg); return; }
-    toast(`申请已提交，需 ${r.eta} 季审批，费用 $${r.fee}M`); rerender();
+    toast(`已申请，需 ${r.eta} 季审批`);
+    logPlayerAction('landing', `申请 ${city.nameZh} 着陆权（${r.eta} 季审批）`);
+    saveGame();
+    rerender();
+  }));
+  $$('.city-link').forEach(a => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    showCityRoutes(a.dataset.id);
   }));
 }
 
-function onCityClickMap(c) {
-  setTab('cities');
+function showCityRoutes(cityId) {
+  const c = CITY_BY_ID[cityId];
+  if (!c) return;
+  // 收集所有公司在该城市的航线
+  const rows = [];
+  for (const al of state.airlines) {
+    for (const r of al.routes) {
+      if (r.fromCity !== cityId && r.toCity !== cityId) continue;
+      const other = CITY_BY_ID[r.fromCity === cityId ? r.toCity : r.fromCity];
+      const dist = distanceKm(c, other);
+      const planes = r.assignedAircraft.length;
+      rows.push({ al, other, dist, planes, route: r });
+    }
+  }
+  rows.sort((a, b) => a.al.id.localeCompare(b.al.id) || a.dist - b.dist);
+  openModal({
+    title: `${c.nameZh} (${c.iata}) 相关航线`,
+    body: `
+      <div class="muted small" style="margin-bottom:8px">
+        ${regionLabel(c.region)} · 规模 ${'★'.repeat(c.size)} · 基础需求 ${c.baseDemand}
+      </div>
+      ${rows.length === 0 ? '<p class="muted">目前无任何航司在此城市运营。</p>' : `
+        <div class="table-wrap"><table class="game-table">
+          <thead><tr><th>航司</th><th>目的地</th><th>距离</th><th>飞机</th><th>载荷</th></tr></thead>
+          <tbody>${rows.map(x => `
+            <tr ${x.al.isPlayer ? 'class="me"' : ''}>
+              <td><span class="dot" style="background:${x.al.color}"></span> ${x.al.nameShort}${x.al.isPlayer ? '（你）' : ''}</td>
+              <td>${x.other.nameZh} (${x.other.iata})</td>
+              <td>${x.dist}km</td>
+              <td>${x.planes}</td>
+              <td>${x.route.lastLoadFactor ? Math.round(x.route.lastLoadFactor * 100) + '%' : '—'}</td>
+            </tr>`).join('')}</tbody>
+        </table></div>
+      `}
+    `,
+    actions: [{ label: '关闭', primary: true, onClick: closeModal }],
+  });
 }
 
 // ----- 财报 -----
@@ -430,13 +756,12 @@ function renderFinance() {
         <div class="fin-card neg"><span>安保 / 合规</span><b>$${fmt(rep.safety)}M</b></div>
         <div class="fin-card neg"><span>机队维护</span><b>$${fmt(rep.maintenance)}M</b></div>
         <div class="fin-card neg"><span>债务利息</span><b>$${fmt(rep.interest)}M</b></div>
-        <div class="fin-card big ${netProfit(rep)>=0?'pos':'neg'}"><span>净利润</span><b>$${fmt(netProfit(rep))}M</b></div>
+        <div class="fin-card big ${netProfit(rep) >= 0 ? 'pos' : 'neg'}"><span>净利润</span><b>$${fmt(netProfit(rep))}M</b></div>
       </div>
       <p class="muted">本季载客 ${Math.round(rep.passengers).toLocaleString()} 人次</p>
     </div>
   `;
 }
-
 function netProfit(r) {
   return r.revenue - r.fuel - r.landing - r.service - r.ad - r.safety - r.maintenance - r.interest;
 }
@@ -453,20 +778,17 @@ function renderLeaderboard() {
       <h3>4 家航司排行</h3>
       <table class="game-table">
         <thead><tr><th>#</th><th>航司</th><th>现金</th><th>债务</th><th>机队</th><th>航线</th><th>声望</th><th>综合分</th></tr></thead>
-        <tbody>
-          ${scored.map((s, i) => `
-            <tr class="${s.al.isPlayer ? 'me' : ''}">
-              <td>${i+1}</td>
-              <td><span class="dot" style="background:${s.al.color}"></span> ${s.al.nameZh}${s.al.isPlayer?'（你）':''}${s.al.bankrupt?' <span class="bad">破产</span>':''}</td>
-              <td>$${fmt(s.al.cash)}M</td>
-              <td>$${fmt(s.al.debt)}M</td>
-              <td>${s.al.aircraft.length}</td>
-              <td>${s.al.routes.length}</td>
-              <td>${Math.round(s.al.prestige)}</td>
-              <td><b>${Math.round(s.score)}</b></td>
-            </tr>
-          `).join('')}
-        </tbody>
+        <tbody>${scored.map((s, i) => `
+          <tr class="${s.al.isPlayer ? 'me' : ''}">
+            <td>${i + 1}</td>
+            <td><span class="dot" style="background:${s.al.color}"></span> ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
+            <td>$${fmt(s.al.cash)}M</td>
+            <td>$${fmt(s.al.debt)}M</td>
+            <td>${s.al.aircraft.length}</td>
+            <td>${s.al.routes.length}</td>
+            <td>${Math.round(s.al.prestige)}</td>
+            <td><b>${Math.round(s.score)}</b></td>
+          </tr>`).join('')}</tbody>
       </table>
     </div>
   `;
@@ -488,9 +810,7 @@ function renderIntel() {
   const recent = state.intelLog.slice().reverse();
   const comp = computeCompetition();
   const recs = computeRecommendations();
-  const player = getPlayer();
 
-  // 上一季度对手动作
   let html = `<div class="panel"><h3>📰 对手最近动态</h3>`;
   if (recent.length === 0) {
     html += `<p class="muted">还没有情报数据。结束一回合后这里会汇总对手在该季度采取的行动。</p>`;
@@ -500,11 +820,8 @@ function renderIntel() {
       if (entry.items.length === 0) {
         html += `<p class="muted">对手按兵不动。</p>`;
       } else {
-        // 按航司分组
         const byAirline = {};
-        for (const it of entry.items) {
-          (byAirline[it.airlineId] = byAirline[it.airlineId] || []).push(it);
-        }
+        for (const it of entry.items) (byAirline[it.airlineId] = byAirline[it.airlineId] || []).push(it);
         html += `<ul class="intel-list">`;
         for (const [aid, items] of Object.entries(byAirline)) {
           const al = state.airlines.find(a => a.id === aid);
@@ -519,10 +836,9 @@ function renderIntel() {
   }
   html += `</div>`;
 
-  // 航线竞争
   html += `<div class="panel"><h3>🎯 航线竞争快照</h3>`;
   if (comp.length === 0) {
-    html += `<p class="muted">还没有航线。先去航线标签开通几条。</p>`;
+    html += `<p class="muted">还没有航线。</p>`;
   } else {
     html += `<div class="table-wrap"><table class="game-table">
       <thead><tr><th>航线</th><th>你的份额</th><th>对手</th></tr></thead><tbody>`;
@@ -532,25 +848,18 @@ function renderIntel() {
       const oppText = c.opponents.length === 0
         ? '<span class="muted">独占</span>'
         : c.opponents.map(o => `<span class="dot" style="background:${o.color}"></span>${o.name}`).join(' ');
-      html += `<tr>
-        <td>${a.nameZh}-${b.nameZh}</td>
-        <td><span class="${shareCls}">${Math.round(c.myShare * 100)}%</span></td>
-        <td>${oppText}</td>
-      </tr>`;
+      html += `<tr><td>${a.nameZh}-${b.nameZh}</td><td><span class="${shareCls}">${Math.round(c.myShare * 100)}%</span></td><td>${oppText}</td></tr>`;
     }
     html += `</tbody></table></div>`;
   }
   html += `</div>`;
 
-  // 策略建议
   html += `<div class="panel"><h3>💡 本季建议</h3>`;
   if (recs.length === 0) {
     html += `<p class="muted">运营平稳，暂无紧迫建议。</p>`;
   } else {
     html += `<ul class="rec-list">`;
-    for (const r of recs) {
-      html += `<li class="rec rec-${r.severity}"><span class="rec-icon">${r.icon}</span><span>${escapeHtml(r.text)}</span></li>`;
-    }
+    for (const r of recs) html += `<li class="rec rec-${r.severity}"><span class="rec-icon">${r.icon}</span><span>${escapeHtml(r.text)}</span></li>`;
     html += `</ul>`;
   }
   html += `</div>`;
@@ -565,9 +874,27 @@ function attachTabHandlers() {
   else if (currentTab === 'cities') attachCitiesHandlers();
 }
 
-// ===== 回合 =====
-function onEndTurn() {
+// ===== 结束季度（先确认） =====
+function onEndTurnConfirm() {
   if (state.gameOver) { showEndGame(); return; }
+  const actions = state.thisTurnActions || [];
+  const summary = actions.length === 0
+    ? '<p class="muted">本季度你还没有做任何操作。</p>'
+    : `<p>本季度你执行了以下 <b>${actions.length}</b> 个操作：</p>
+       <ul class="action-list">${actions.map(a => `<li>${escapeHtml(a.desc)}</li>`).join('')}</ul>`;
+  openModal({
+    title: `${state.year} Q${state.quarter} · 结束季度？`,
+    body: `${summary}
+      <p class="muted small" style="margin-top:.8em">确认后会推进到下一季度，AI 行动 + 历史事件依次结算。</p>`,
+    actions: [
+      { label: '继续本季操作', onClick: closeModal },
+      { label: '确认结束 →', primary: true, onClick: () => { closeModal(); doEndTurn(); } },
+    ],
+  });
+}
+
+function doEndTurn() {
+  clearTurnActions();
   const triggered = advanceQuarter(runAiTurn);
   state.pendingDialog = { type: 'quarter', triggered: triggered.map(e => e.id) };
   saveGame();
@@ -584,26 +911,28 @@ function onEndTurn() {
 function showQuarterReport() {
   const p = getPlayer();
   const rep = state.lastQuarterReports[p.id];
+  if (state.gameOver) { showEndGame(); return; }
   if (!rep) { rerender(); return; }
   const triggeredIds = state.pendingDialog?.triggered || [];
-  const events = triggeredIds.map(id => EVENTS.find(e=>e.id===id)).filter(Boolean);
-  if (state.gameOver) { showEndGame(); return; }
+  const events = triggeredIds.map(id => EVENTS.find(e => e.id === id)).filter(Boolean);
   openModal({
     title: `${state.year} Q${state.quarter} · 新季度开局`,
     body: `
       <div class="report-summary">
-        <div><span class="lbl">上季净利润</span><b class="${netProfit(rep)>=0?'pos':'neg'}">$${fmt(netProfit(rep))}M</b></div>
+        <div><span class="lbl">上季净利润</span><b class="${netProfit(rep) >= 0 ? 'pos' : 'neg'}">$${fmt(netProfit(rep))}M</b></div>
         <div><span class="lbl">载客</span><b>${Math.round(rep.passengers).toLocaleString()}</b></div>
         <div><span class="lbl">现金</span><b>$${fmt(p.cash)}M</b></div>
       </div>
       ${events.length === 0 ? '<p class="muted">本季无重大行业事件。</p>' :
-        '<h4 style="margin-top:1em">本季事件：</h4><ul>' +
-        events.map(e => `<li><b>${e.nameZh}</b><br><span class="muted">${e.descZh}</span></li>`).join('') +
-        '</ul>'}
+      '<h4 style="margin-top:1em">本季事件：</h4><ul>' +
+      events.map(e => `<li><b>${e.nameZh}</b><br><span class="muted">${e.descZh}</span></li>`).join('') +
+      '</ul>'}
     `,
-    actions: [{ label: '继续', primary: true, onClick: () => {
-      state.pendingDialog = null; saveGame(); closeModal(); rerender();
-    } }],
+    actions: [{
+      label: '继续', primary: true, onClick: () => {
+        state.pendingDialog = null; saveGame(); closeModal(); rerender();
+      },
+    }],
   });
 }
 
@@ -613,10 +942,7 @@ function showEventChoice(eventId) {
   const p = getPlayer();
   openModal({
     title: `📰 ${ev.triggerYear} Q${ev.triggerQuarter} · ${ev.nameZh}`,
-    body: `
-      <p>${ev.descZh}</p>
-      <p><b>${ev.choice.prompt}</b></p>
-    `,
+    body: `<p>${ev.descZh}</p><p><b>${ev.choice.prompt}</b></p>`,
     actions: ev.choice.options.map(opt => ({
       label: opt.label,
       onClick: () => {
@@ -624,9 +950,8 @@ function showEventChoice(eventId) {
         state.pendingEvent = null;
         saveGame();
         closeModal();
-        // pendingDialog 已在 onEndTurn 中包含本季所有触发事件
         showQuarterReport();
-      }
+      },
     })),
   });
 }
@@ -645,43 +970,58 @@ function showEndGame() {
       <h3 style="margin:0 0 .5em">你最终排名 第 ${rank} 名</h3>
       <table class="game-table">
         <thead><tr><th>#</th><th>航司</th><th>综合分</th><th>现金</th><th>机队</th><th>声望</th></tr></thead>
-        <tbody>${scored.map((s,i)=>`
-          <tr class="${s.al.isPlayer?'me':''}">
-            <td>${i+1}</td>
+        <tbody>${scored.map((s, i) => `
+          <tr class="${s.al.isPlayer ? 'me' : ''}">
+            <td>${i + 1}</td>
             <td><span class="dot" style="background:${s.al.color}"></span> ${s.al.nameZh}</td>
             <td><b>${Math.round(s.score)}</b></td>
             <td>$${fmt(s.al.cash)}M</td>
             <td>${s.al.aircraft.length}</td>
             <td>${Math.round(s.al.prestige)}</td>
-          </tr>`).join('')}
-        </tbody>
+          </tr>`).join('')}</tbody>
       </table>
       <h4 style="margin-top:1em">30 年经历的事件：</h4>
       <ul style="max-height:200px;overflow:auto">${state.eventLog.map(id => {
-        const e = EVENTS.find(x=>x.id===id);
+        const e = EVENTS.find(x => x.id === id);
         return e ? `<li>${e.triggerYear} Q${e.triggerQuarter} · ${e.nameZh}</li>` : '';
       }).join('')}</ul>
     `,
     actions: [
-      { label: '回到主页', onClick: () => { clearSave(); location.href = '../index.html'; } },
-      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showStartScreen(); } },
+      { label: '回到主页', onClick: () => { clearSave(); closeModal(); showStartScreen(); } },
+      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showAirlinePicker(); } },
     ],
   });
 }
 
+// ===== 菜单 =====
 function openMenu() {
+  const slots = listSaveSlots();
   openModal({
-    title: '游戏菜单',
-    body: '<p class="muted">选择操作</p>',
+    title: '⚙️ 游戏菜单',
+    body: `
+      <div class="menu-section">
+        <h4>💾 保存到</h4>
+        <div class="slot-list small">${slots.map((s, i) => slotCardHtml(s, i + 1, 'save')).join('')}</div>
+      </div>
+      <div class="menu-section">
+        <h4>📂 读取</h4>
+        <div class="slot-list small">${slots.map((s, i) => slotCardHtml(s, i + 1, 'load')).join('')}</div>
+      </div>
+    `,
     actions: [
-      { label: '保存进度', onClick: () => { saveGame(); toast('已保存'); closeModal(); } },
-      { label: '放弃并开新游戏', onClick: () => {
-        if (!confirm('放弃当前进度并开始新游戏？')) return;
-        clearSave(); closeModal(); showStartScreen();
-      }},
+      {
+        label: '🏠 回到首页', onClick: () => {
+          if (!confirm('回到首页将保留当前自动存档，确定？')) return;
+          closeModal();
+          showStartScreen();
+        },
+      },
       { label: '关闭', primary: true, onClick: closeModal },
     ],
   });
+  // Attach handlers AFTER modal renders
+  const modal = $('.modal');
+  if (modal) attachSlotHandlers(modal, 'menu');
 }
 
 // ===== Modal / Toast =====
@@ -693,7 +1033,7 @@ function openModal({ title, body, actions = [] }) {
       <h2>${title}</h2>
       <div class="modal-body">${body}</div>
       <div class="modal-actions">
-        ${actions.map((a,i) => `<button class="${a.primary?'primary-btn':'ghost-btn'}" data-i="${i}">${a.label}</button>`).join('')}
+        ${actions.map((a, i) => `<button class="${a.primary ? 'primary-btn' : 'ghost-btn'}" data-i="${i}">${a.label}</button>`).join('')}
       </div>
     </div>
   `;
@@ -701,9 +1041,7 @@ function openModal({ title, body, actions = [] }) {
     btn.addEventListener('click', () => actions[i].onClick && actions[i].onClick());
   });
 }
-function closeModal() {
-  $('#modal-root').innerHTML = '';
-}
+function closeModal() { $('#modal-root').innerHTML = ''; }
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -713,23 +1051,27 @@ function toast(msg) {
 }
 
 // ===== utils =====
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-}
-
 function fmt(n) {
   if (typeof n !== 'number') return '0';
-  if (Math.abs(n) >= 10000) return (n/1000).toFixed(1) + 'k';
+  if (Math.abs(n) >= 10000) return (n / 1000).toFixed(1) + 'k';
   if (Math.abs(n) >= 100) return n.toFixed(0);
   if (Math.abs(n) >= 1) return n.toFixed(1);
   return n.toFixed(2);
 }
 function flagOf(country) {
-  const map = { CN:'🇨🇳', US:'🇺🇸', DE:'🇩🇪', SG:'🇸🇬', JP:'🇯🇵', HK:'🇭🇰', KR:'🇰🇷',
-                TH:'🇹🇭', IN:'🇮🇳', AE:'🇦🇪', GB:'🇬🇧', FR:'🇫🇷', NL:'🇳🇱', AU:'🇦🇺', BR:'🇧🇷' };
+  const map = {
+    CN: '🇨🇳', US: '🇺🇸', DE: '🇩🇪', SG: '🇸🇬', JP: '🇯🇵', HK: '🇭🇰', KR: '🇰🇷',
+    TH: '🇹🇭', IN: '🇮🇳', AE: '🇦🇪', GB: '🇬🇧', FR: '🇫🇷', NL: '🇳🇱', AU: '🇦🇺', BR: '🇧🇷',
+    RU: '🇷🇺', TR: '🇹🇷', MX: '🇲🇽', EG: '🇪🇬', ZA: '🇿🇦', CA: '🇨🇦', AR: '🇦🇷', CO: '🇨🇴',
+  };
   return map[country] || '🏳️';
 }
 function regionLabel(r) {
-  return { asia:'亚洲', europe:'欧洲', namerica:'北美', samerica:'南美',
-           mideast:'中东', oceania:'大洋洲', africa:'非洲' }[r] || r;
+  return {
+    asia: '亚洲', europe: '欧洲', namerica: '北美', samerica: '南美',
+    mideast: '中东', oceania: '大洋洲', africa: '非洲',
+  }[r] || r;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }

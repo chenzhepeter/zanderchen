@@ -2,25 +2,35 @@ import { AIRLINES } from './data/airlines.js';
 import { AIRCRAFT_BY_ID } from './data/aircraft.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
 
-export const STORAGE_KEY = 'airline.save';
-export const SAVE_VERSION = 4;
+export const STORAGE_KEY = 'airline.save';     // 自动存档
+export const SLOT_KEY = (i) => `airline.slot.${i}`;
+export const SAVE_VERSION = 5;
+export const NUM_SLOTS = 5;
 
-// 单例 GameState — 用模块内可变对象暴露
+// Ad tier 配置（取代之前的 adSpend 数值）
+export const AD_TIERS = {
+  none:  { cost: 0,    boost: 1.00, label: '无广告' },
+  small: { cost: 1e6,  boost: 1.06, label: '小额广告 ($1M)' },
+  large: { cost: 4e6,  boost: 1.15, label: '大额广告 ($4M)' },
+};
+
+// 单例 GameState
 export const state = {
   version: SAVE_VERSION,
   year: 2000,
   quarter: 1,
-  playerId: null,         // 玩家选中的航司 id
-  airlines: [],           // 4 家 (含玩家)
-  fuelPrice: 1.0,         // 单位倍率，1.0 = 基准
+  playerId: null,
+  airlines: [],
+  fuelPrice: 1.0,
   fuelPriceBase: 1.0,
-  activeEffects: [],      // 来自历史事件的持续效果
-  eventLog: [],           // 已触发过的事件 id 列表
-  pendingEvent: null,     // 等待玩家决策的事件
-  pendingDialog: null,    // 季度结算弹窗
-  landingApplications: [],// {airlineId, cityId, eta}
-  lastQuarterReports: {}, // airlineId -> { revenue, fuel, opCost, profit, routes: [...] }
-  intelLog: [],           // 最近 N 个季度的对手动作: [{ tag, year, quarter, items: [{ airlineId, type, desc }] }]
+  activeEffects: [],
+  eventLog: [],
+  pendingEvent: null,
+  pendingDialog: null,
+  landingApplications: [],
+  lastQuarterReports: {},
+  intelLog: [],
+  thisTurnActions: [],   // 本季玩家操作日志（结束季度时回顾，季末清空）
   gameOver: false,
 };
 
@@ -43,6 +53,7 @@ export function initNewGame(playerId) {
   state.landingApplications = [];
   state.lastQuarterReports = {};
   state.intelLog = [];
+  state.thisTurnActions = [];
   state.gameOver = false;
   uidCounter = 1;
   routeCounter = 1;
@@ -52,33 +63,37 @@ export function initNewGame(playerId) {
     const aircraft = [];
     for (const { modelId, count } of tmpl.initialFleet) {
       for (let i = 0; i < count; i++) {
-        aircraft.push({ uid: newUid(), modelId, ageQuarters: Math.floor(Math.random()*20), routeId: null, grounded: false });
+        aircraft.push({ uid: newUid(), modelId, ageQuarters: Math.floor(Math.random() * 20), routeId: null, grounded: false });
       }
     }
-    const routes = [];
     const landingRights = new Set([tmpl.hubCity]);
     for (const [fromId, toId] of tmpl.initialRoutes) {
       landingRights.add(fromId);
       landingRights.add(toId);
-      const r = {
-        id: newRouteId(),
-        ownerId: tmpl.id,
-        fromCity: fromId,
-        toCity: toId,
-        fare: defaultFareFor(fromId, toId),
-        serviceLevel: 2,
-        adSpend: 0,
-        assignedAircraft: [],
-        lastLoadFactor: 0.75,
-        lastProfit: 0,
-      };
-      routes.push(r);
     }
-    // 给每条初始航线分配一架飞机（找一架尚未分配的）
-    for (const r of routes) {
-      const dist = distanceKm(CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity]);
+    // 先建好航线对象（不带飞机）
+    const routes = tmpl.initialRoutes.map(([fromId, toId]) => ({
+      id: newRouteId(),
+      ownerId: tmpl.id,
+      fromCity: fromId,
+      toCity: toId,
+      fare: defaultFareFor(fromId, toId),
+      adTier: 'none',
+      assignedAircraft: [],
+      lastLoadFactor: 0.75,
+      lastProfit: 0,
+    }));
+    // 给每条航线找一架航程足够的闲置飞机
+    // 按航线距离从长到短分配，确保长航线先拿到大飞机
+    const routeByDist = routes.map(r => ({
+      r, dist: distanceKm(CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity]),
+    })).sort((a, b) => b.dist - a.dist);
+    for (const { r, dist } of routeByDist) {
       const ac = aircraft.find(a => !a.routeId && AIRCRAFT_BY_ID[a.modelId].rangeKm >= dist);
-      if (ac) { ac.routeId = r.id; r.assignedAircraft.push(ac.uid); }
+      if (ac) {
+        ac.routeId = r.id;
+        r.assignedAircraft.push(ac.uid);
+      }
     }
     return {
       id: tmpl.id,
@@ -103,12 +118,10 @@ export function initNewGame(playerId) {
 }
 
 function pickAiProfile(id) {
-  // 固定分配避免 RNG: 让不同基地的 AI 各具个性
   const map = { CCA: 'aggressive', DAL: 'balanced', DLH: 'conservative', SIA: 'balanced' };
   return map[id] || 'balanced';
 }
 
-// 默认票价：粗略 = 60 + 距离*0.08 (美元)
 export function defaultFareFor(fromId, toId) {
   const a = CITY_BY_ID[fromId], b = CITY_BY_ID[toId];
   const d = distanceKm(a, b);
@@ -131,10 +144,21 @@ export function findRoute(airline, routeId) {
   return airline.routes.find(r => r.id === routeId);
 }
 
-// ---- save / load ----
-export function saveGame() {
-  const payload = {
+// === 玩家操作日志（用于结束季度的确认弹窗） ===
+export function logPlayerAction(type, desc) {
+  if (!state.thisTurnActions) state.thisTurnActions = [];
+  state.thisTurnActions.push({ type, desc, ts: Date.now() });
+}
+
+export function clearTurnActions() {
+  state.thisTurnActions = [];
+}
+
+// === 序列化 ===
+function buildPayload() {
+  return {
     version: SAVE_VERSION,
+    savedAt: Date.now(),
     state: {
       year: state.year, quarter: state.quarter,
       playerId: state.playerId,
@@ -146,34 +170,35 @@ export function saveGame() {
       landingApplications: state.landingApplications,
       lastQuarterReports: state.lastQuarterReports,
       intelLog: state.intelLog,
+      thisTurnActions: state.thisTurnActions,
       gameOver: state.gameOver,
       airlines: state.airlines,
     },
     counters: { uid: uidCounter, route: routeCounter },
   };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    return true;
-  } catch (e) {
-    console.warn('save failed', e);
-    return false;
-  }
+}
+
+function applyPayload(p) {
+  if (!p || p.version !== SAVE_VERSION) return false;
+  Object.assign(state, p.state);
+  if (!state.thisTurnActions) state.thisTurnActions = [];
+  uidCounter = p.counters?.uid || 1;
+  routeCounter = p.counters?.route || 1;
+  return true;
+}
+
+// 自动存档
+export function saveGame() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPayload())); return true; }
+  catch (e) { console.warn('save failed', e); return false; }
 }
 
 export function loadGame() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return false;
-    const p = JSON.parse(raw);
-    if (!p || p.version !== SAVE_VERSION) return false;
-    Object.assign(state, p.state);
-    uidCounter = p.counters?.uid || 1;
-    routeCounter = p.counters?.route || 1;
-    return true;
-  } catch (e) {
-    console.warn('load failed', e);
-    return false;
-  }
+    return applyPayload(JSON.parse(raw));
+  } catch (e) { console.warn('load failed', e); return false; }
 }
 
 export function clearSave() {
@@ -184,5 +209,49 @@ export function hasSave() {
   try { return !!localStorage.getItem(STORAGE_KEY); } catch { return false; }
 }
 
-// 暴露 uid 工厂供 ui.js 使用
+// 手动多档存档（5 个槽位）
+export function saveToSlot(slot) {
+  if (slot < 1 || slot > NUM_SLOTS) return false;
+  try { localStorage.setItem(SLOT_KEY(slot), JSON.stringify(buildPayload())); return true; }
+  catch (e) { console.warn('save slot failed', e); return false; }
+}
+
+export function loadFromSlot(slot) {
+  if (slot < 1 || slot > NUM_SLOTS) return false;
+  try {
+    const raw = localStorage.getItem(SLOT_KEY(slot));
+    if (!raw) return false;
+    return applyPayload(JSON.parse(raw));
+  } catch (e) { console.warn('load slot failed', e); return false; }
+}
+
+export function deleteSlot(slot) {
+  if (slot < 1 || slot > NUM_SLOTS) return false;
+  try { localStorage.removeItem(SLOT_KEY(slot)); return true; } catch { return false; }
+}
+
+// 返回 5 个槽位的元信息（空槽为 null）
+export function listSaveSlots() {
+  const out = [];
+  for (let i = 1; i <= NUM_SLOTS; i++) {
+    try {
+      const raw = localStorage.getItem(SLOT_KEY(i));
+      if (!raw) { out.push(null); continue; }
+      const p = JSON.parse(raw);
+      if (!p || p.version !== SAVE_VERSION) { out.push(null); continue; }
+      const me = p.state.airlines?.find(a => a.id === p.state.playerId);
+      out.push({
+        slot: i,
+        savedAt: p.savedAt,
+        year: p.state.year,
+        quarter: p.state.quarter,
+        airlineName: me?.nameZh || p.state.playerId,
+        cash: me?.cash || 0,
+        routes: me?.routes?.length || 0,
+      });
+    } catch { out.push(null); }
+  }
+  return out;
+}
+
 export { newUid, newRouteId };
