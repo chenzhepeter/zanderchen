@@ -128,7 +128,9 @@ export function drawLand(el) {
   layer.innerHTML = '';
 
   if (landPolygons) {
-    // 每个多边形一条 <path>，配合 fill-rule="evenodd" 正确呈现外环+空洞
+    // 每个多边形一条 <path>，无描边——避免反子午线（antimeridian）穿越在等矩
+    // Cartesian 投影下产生横跨地图的伪边线（俄罗斯/阿留申/南极洲等都会触发）。
+    // 同时配合 fill-rule="evenodd" 正确呈现外环 + 空洞。
     for (const poly of landPolygons) {
       const d = polygonToPath(poly);
       if (!d) continue;
@@ -136,9 +138,7 @@ export function drawLand(el) {
         d,
         fill: '#e7eddc',
         'fill-rule': 'evenodd',
-        stroke: '#9aae89',
-        'stroke-width': 0.4,
-        'stroke-linejoin': 'round',
+        stroke: 'none',
       }));
     }
   } else {
@@ -151,18 +151,42 @@ export function drawLand(el) {
   }
 }
 
-// 一个多边形（外环 + 0..N 内环空洞）→ 一条 path 数据
+// 一个多边形（外环 + 0..N 内环空洞）→ 一条 path 数据。
+// 在反子午线（|Δlng| > 180）处切断 ring，避免世界两侧的顶点被直接连成
+// 一条横跨全图的假边。
 function polygonToPath(poly) {
   const parts = [];
   for (const ring of poly) {
     if (!ring || ring.length === 0) continue;
-    const pts = ring.map(([lng, lat]) => {
-      const p = project(lng, lat);
-      return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
-    });
-    parts.push('M' + pts.join('L') + 'Z');
+    const segments = splitRingAtAntimeridian(ring);
+    for (const seg of segments) {
+      if (seg.length < 2) continue;
+      const pts = seg.map(([lng, lat]) => {
+        const p = project(lng, lat);
+        return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+      });
+      parts.push('M' + pts.join('L') + 'Z');
+    }
   }
   return parts.join(' ');
+}
+
+function splitRingAtAntimeridian(ring) {
+  const segs = [];
+  let cur = [];
+  for (let i = 0; i < ring.length; i++) {
+    const [lng, lat] = ring[i];
+    if (cur.length > 0) {
+      const prevLng = ring[i - 1][0];
+      if (Math.abs(lng - prevLng) > 180) {
+        segs.push(cur);
+        cur = [];
+      }
+    }
+    cur.push([lng, lat]);
+  }
+  if (cur.length > 0) segs.push(cur);
+  return segs;
 }
 
 // === 航线 + 城市 (与之前相同接口) ===
