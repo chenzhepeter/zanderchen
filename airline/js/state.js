@@ -1,11 +1,12 @@
 import { AIRLINES } from './data/airlines.js';
 import { AIRCRAFT_BY_ID } from './data/aircraft.js';
-import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
+import { CITIES, CITY_BY_ID, distanceKm, recomputeCityStates } from './data/cities.js';
 
 export const STORAGE_KEY = 'airline.save';
 export const SLOT_KEY = (i) => `airline.slot.${i}`;
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;   // 每次重大 schema/数据变化时 +1，老存档自动作废
 export const NUM_SLOTS = 5;
+export const APP_VERSION = '2026.5.16.7';
 
 // 单例 GameState
 // 注意: route 现在只挂 1 架飞机（route.aircraftUid，可为 null）；同一城市对允许多条独立航线
@@ -58,6 +59,7 @@ export function initNewGame(playerId) {
   state.gameOver = false;
   uidCounter = 1;
   routeCounter = 1;
+  recomputeCityStates(2000);
 
   state.airlines = AIRLINES.map(tmpl => {
     const isPlayer = tmpl.id === playerId;
@@ -82,6 +84,7 @@ export function initNewGame(playerId) {
       aircraftUid: null,
       lastLoadFactor: 0.75,
       lastProfit: 0,
+      _committed: null,  // 季末提交的"基线"，revert 用
     }));
     // 按距离从长到短分配兼容飞机，确保长航线先拿到大飞机
     const byDist = routes.map(r => ({
@@ -92,6 +95,7 @@ export function initNewGame(playerId) {
       if (ac) { ac.routeId = r.id; r.aircraftUid = ac.uid; }
       // 默认票价: 盈亏平衡价 × 2.0（50% 毛利率）
       r.fare = Math.round(quickBreakEven(dist, CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity], 1.0) * 2.0);
+      r._committed = { fare: r.fare, aircraftUid: r.aircraftUid };
     }
     return {
       id: tmpl.id,
@@ -131,6 +135,20 @@ export function logPlayerAction(type, desc) {
   state.thisTurnActions.push({ type, desc, ts: Date.now() });
 }
 export function clearTurnActions() { state.thisTurnActions = []; }
+
+// 季末为所有航线打基线快照（revert 用）；同步玩家航线和 AI 航线
+export function commitAllRouteSnapshots() {
+  for (const al of state.airlines) {
+    for (const r of al.routes) {
+      r._committed = { fare: r.fare, aircraftUid: r.aircraftUid };
+    }
+  }
+}
+
+export function routeIsModified(route) {
+  if (!route._committed) return false;
+  return route._committed.fare !== route.fare || route._committed.aircraftUid !== route.aircraftUid;
+}
 
 // === 序列化 ===
 function buildPayload() {

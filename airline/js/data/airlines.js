@@ -1,5 +1,4 @@
-// 4 家可选航司，玩家选 1 家，其余 3 家为 AI
-// initialFleet 列出每家在 2000 Q1 的粗略机队（按机型 id × 数量）
+// 4 家可选航司。删除 FRA 后用伊比利亚（IBE/MAD）取代汉莎（DLH/FRA）。
 
 export const AIRLINES = [
   {
@@ -19,8 +18,8 @@ export const AIRLINES = [
       { modelId: 'A320',  count: 2 },
     ],
     initialRoutes: [
-      ['PEK', 'PVG'], ['PEK', 'ICN'], ['PEK', 'HKG'],
-      ['PEK', 'HND'], ['PEK', 'FRA'],
+      ['PEK', 'PVG'], ['PEK', 'SIN'], ['PEK', 'HKG'],
+      ['PEK', 'HND'], ['PEK', 'LHR'],
     ],
   },
   {
@@ -40,29 +39,29 @@ export const AIRLINES = [
       { modelId: '737NG', count: 4 },
     ],
     initialRoutes: [
-      ['ATL', 'JFK'], ['ATL', 'LAX'], ['ATL', 'ORD'],
+      ['ATL', 'JFK'], ['ATL', 'LAX'], ['ATL', 'MEX'],
       ['ATL', 'CDG'], ['JFK', 'LHR'],
     ],
   },
   {
-    id: 'DLH',
-    codeIATA: 'LH',
-    nameZh: '汉莎航空',
-    nameShort: '汉莎',
-    country: 'DE',
-    hubCity: 'FRA',
+    id: 'IBE',
+    codeIATA: 'IB',
+    nameZh: '伊比利亚航空',
+    nameShort: '伊航',
+    country: 'ES',
+    hubCity: 'MAD',
     color: '#f59e0b',
     initialCash: 1300,
     initialDebt: 500,
     initialPrestige: 55,
     initialFleet: [
-      { modelId: 'A320', count: 6 },
+      { modelId: 'A320', count: 5 },
       { modelId: 'A330', count: 3 },
       { modelId: '767',  count: 2 },
     ],
     initialRoutes: [
-      ['FRA', 'LHR'], ['FRA', 'CDG'], ['FRA', 'JFK'],
-      ['FRA', 'PEK'], ['FRA', 'DXB'],
+      ['MAD', 'LHR'], ['MAD', 'CDG'], ['MAD', 'JFK'],
+      ['MAD', 'GRU'], ['MAD', 'MEX'],
     ],
   },
   {

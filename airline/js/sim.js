@@ -1,5 +1,5 @@
-import { state } from './state.js';
-import { CITY_BY_ID, distanceKm } from './data/cities.js';
+import { state, commitAllRouteSnapshots } from './state.js';
+import { CITY_BY_ID, distanceKm, recomputeCityStates, SLOTS_BY_SIZE } from './data/cities.js';
 import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
 
@@ -13,12 +13,30 @@ export function advanceQuarter(aiActFn) {
   decayEffects();
   processLandingApplications();
   checkGameOver();
+  // 季末所有航线 commit 一次基线，玩家下季的"还原"以此为准
+  commitAllRouteSnapshots();
   return triggered;
+}
+
+// 单城市当前已使用的航线槽位 (所有航司聚合)
+export function routesAtCity(cityId) {
+  let n = 0;
+  for (const al of state.airlines) for (const r of al.routes) {
+    if (r.fromCity === cityId || r.toCity === cityId) n++;
+  }
+  return n;
+}
+export function cityRouteSlots(city) {
+  return SLOTS_BY_SIZE[city.size] || 6;
 }
 
 export function advanceTime() {
   state.quarter += 1;
-  if (state.quarter > 4) { state.quarter = 1; state.year += 1; }
+  if (state.quarter > 4) {
+    state.quarter = 1; state.year += 1;
+    // 跨年时同步城市规模演化 (亚洲崛起 etc.)
+    recomputeCityStates(state.year);
+  }
 }
 
 // === 事件触发 ===
@@ -362,12 +380,19 @@ export function openRoute(airline, fromCity, toCity, fare, aircraftUid) {
   if (fromCity === toCity) return { ok: false, msg: '起降城市不能相同' };
   if (!airline.landingRights.includes(fromCity)) return { ok: false, msg: `没有 ${fromCity} 着陆权` };
   if (!airline.landingRights.includes(toCity))   return { ok: false, msg: `没有 ${toCity} 着陆权` };
+  // 检查两端城市的航线槽位
+  const fromC = CITY_BY_ID[fromCity], toC = CITY_BY_ID[toCity];
+  const fromUsed = routesAtCity(fromCity), fromCap = cityRouteSlots(fromC);
+  if (fromUsed >= fromCap) return { ok: false, msg: `${fromC.nameZh} 航线槽位已满 (${fromUsed}/${fromCap})` };
+  const toUsed = routesAtCity(toCity), toCap = cityRouteSlots(toC);
+  if (toUsed >= toCap) return { ok: false, msg: `${toC.nameZh} 航线槽位已满 (${toUsed}/${toCap})` };
+
   if (!aircraftUid) return { ok: false, msg: '必须指定一架飞机' };
   const ac = airline.aircraft.find(a => a.uid === aircraftUid);
   if (!ac) return { ok: false, msg: '飞机不存在' };
   if (ac.routeId) return { ok: false, msg: '该飞机已在执飞其他航线' };
   if (ac.grounded) return { ok: false, msg: '该飞机被停飞' };
-  const dist = distanceKm(CITY_BY_ID[fromCity], CITY_BY_ID[toCity]);
+  const dist = distanceKm(fromC, toC);
   const m = AIRCRAFT_BY_ID[ac.modelId];
   if (m.rangeKm < dist) return { ok: false, msg: `${m.name} 航程不足（${m.rangeKm}km < ${dist}km）` };
   const finalFare = fare || Math.round(computeBreakEvenFare(airline, { fromCity, toCity }) * 2.0);
@@ -379,6 +404,7 @@ export function openRoute(airline, fromCity, toCity, fare, aircraftUid) {
     aircraftUid: ac.uid,
     lastLoadFactor: 0,
     lastProfit: 0,
+    _committed: { fare: finalFare, aircraftUid: ac.uid },
   };
   airline.routes.push(newRoute);
   ac.routeId = newRoute.id;

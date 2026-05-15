@@ -1,7 +1,7 @@
 import {
-  state, getPlayer, saveGame, loadGame, clearSave, hasSave, initNewGame,
-  saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, NUM_SLOTS,
-  logPlayerAction, clearTurnActions,
+  state, getPlayer, saveGame, loadGame, clearSave, initNewGame,
+  saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, NUM_SLOTS, APP_VERSION,
+  logPlayerAction, clearTurnActions, routeIsModified,
 } from './state.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
 import { AIRCRAFT, AIRCRAFT_BY_ID } from './data/aircraft.js';
@@ -12,6 +12,7 @@ import {
   buyAircraft, sellAircraft, openRoute, closeRoute,
   assignAircraftToRoute, setFare,
   applyForLanding, computeBreakEvenFare,
+  cityRouteSlots, routesAtCity,
 } from './sim.js';
 import { runAiTurn } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
@@ -22,6 +23,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 let currentTab = 'routes';
 let cityTabSort = { col: 'region', dir: 'asc' };
+let intelSelectedCompetitor = null;  // 选中的对手 airline id
 
 export function bootUi() {
   buildShell();
@@ -35,6 +37,7 @@ function buildShell() {
     <div id="game-screen" class="screen" hidden>
       <header id="top-bar" class="top-bar">
         <button id="menu-btn" class="menu-btn" aria-label="菜单">⚙️</button>
+        <button id="end-turn-btn" class="primary-btn end-turn-top">结束季度 →</button>
         <div id="hud" class="hud"></div>
       </header>
       <section id="map-wrap" class="map-wrap">
@@ -48,11 +51,9 @@ function buildShell() {
         <button class="tab" data-tab="leaderboard">排行</button>
         <button class="tab" data-tab="history">事件</button>
         <button class="tab" data-tab="intel">情报</button>
+        <button class="tab" data-tab="strategy">策略</button>
       </nav>
       <section id="tab-body" class="tab-body"></section>
-      <div class="end-turn-area">
-        <button id="end-turn-btn" class="primary-btn big">结束季度 →</button>
-      </div>
     </div>
     <div id="modal-root"></div>
     <div id="toast"></div>
@@ -76,6 +77,7 @@ function showStartMenu() {
         <button class="primary-btn big" id="new-game-btn">🎮 开始新游戏</button>
         <button class="ghost-btn big" id="load-game-btn">📂 读取存档</button>
       </div>
+      <div class="version-tag">v${APP_VERSION}</div>
     </div>
   `;
   $('#new-game-btn').addEventListener('click', showAirlinePicker);
@@ -119,41 +121,18 @@ function showAirlinePicker() {
 function showLoadSlotsScreen() {
   const root = $('#start-screen');
   const slots = listSaveSlots();
-  const autoSave = hasSave();
   root.innerHTML = `
     <div class="start-card centered">
       <h1 class="game-title">📂 读取存档</h1>
-      <p class="hint">选择要读取的存档。共 ${NUM_SLOTS} 个手动槽位 + 1 个自动存档。</p>
+      <p class="hint">${NUM_SLOTS} 个手动槽位 — 选择要读取的存档。</p>
       <div class="slot-list">
-        ${autoSave ? `
-          <div class="slot-card auto">
-            <div class="slot-num">📌 自动</div>
-            <div class="slot-info">${autoSaveLabel()}</div>
-            <div class="slot-actions">
-              <button class="primary-btn small" id="load-auto">继续</button>
-            </div>
-          </div>` : ''}
         ${slots.map((s, i) => slotCardHtml(s, i + 1, 'load')).join('')}
       </div>
       <button class="ghost-btn" id="back-to-menu">← 返回</button>
     </div>
   `;
   attachSlotHandlers(root, 'load');
-  const autoBtn = $('#load-auto');
-  if (autoBtn) autoBtn.addEventListener('click', () => {
-    if (loadGame()) { showGameView(); toast('已读取自动存档'); }
-  });
   $('#back-to-menu').addEventListener('click', showStartMenu);
-}
-
-function autoSaveLabel() {
-  try {
-    const raw = localStorage.getItem('airline.save');
-    const p = JSON.parse(raw);
-    const me = p.state.airlines?.find(a => a.id === p.state.playerId);
-    const d = new Date(p.savedAt);
-    return `<b>${escapeHtml(me?.nameZh || '?')}</b> · ${p.state.year} Q${p.state.quarter} · 保存于 ${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  } catch { return '自动存档'; }
 }
 
 function slotCardHtml(meta, slot, mode) {
@@ -278,6 +257,7 @@ function renderTabBody() {
   else if (currentTab === 'leaderboard') body.innerHTML = renderLeaderboard();
   else if (currentTab === 'history') body.innerHTML = renderHistory();
   else if (currentTab === 'intel') body.innerHTML = renderIntel();
+  else if (currentTab === 'strategy') body.innerHTML = renderStrategy();
   attachTabHandlers();
 }
 
@@ -308,10 +288,11 @@ function renderRoutes() {
       ${candidates.map(ac => {
         const m = AIRCRAFT_BY_ID[ac.modelId];
         const isCur = ac.uid === r.aircraftUid;
-        return `<option value="${ac.uid}" ${isCur ? 'selected' : ''}>${m.name} · ${m.capacity}座${isCur ? '（当前）' : ''}</option>`;
+        return `<option value="${ac.uid}" ${isCur ? 'selected' : ''}>${m.name} · ${m.capacity}座 · ${m.rangeKm}km${isCur ? '（当前）' : ''}</option>`;
       }).join('')}
     </select>`;
 
+    const modified = routeIsModified(r);
     return `
       <tr data-route="${r.id}">
         <td>
@@ -331,7 +312,10 @@ function renderRoutes() {
         <td class="ac-cell">${acSelect}</td>
         <td>${r.lastLoadFactor ? (r.lastLoadFactor * 100).toFixed(0) + '%' : '—'}</td>
         <td class="${r.lastProfit >= 0 ? 'pos' : 'neg'}">$${fmt(r.lastProfit)}M</td>
-        <td><button class="mini r-close" data-route="${r.id}">关闭</button></td>
+        <td class="route-actions">
+          <button class="mini r-revert" data-route="${r.id}" ${modified ? '' : 'disabled'} title="还原本季度修改">↺ 还原</button>
+          <button class="mini r-close" data-route="${r.id}">关闭</button>
+        </td>
       </tr>`;
   }).join('');
   return `
@@ -398,6 +382,28 @@ function attachRouteHandlers() {
       rerender();
     });
   });
+  $$('.r-revert').forEach(b => {
+    if (b.disabled) return;
+    b.addEventListener('click', () => {
+      const rid = b.dataset.route;
+      const r = p.routes.find(x => x.id === rid);
+      if (!r || !r._committed) return;
+      const targetUid = r._committed.aircraftUid;
+      const sameAc = r.aircraftUid === targetUid;
+      if (!sameAc) {
+        const targetAc = targetUid ? p.aircraft.find(a => a.uid === targetUid) : null;
+        if (targetUid && (!targetAc || (targetAc.routeId && targetAc.routeId !== r.id) || targetAc.grounded)) {
+          toast(`原飞机已不可用，仅恢复票价`);
+        } else {
+          assignAircraftToRoute(p, r.id, targetUid);
+        }
+      }
+      r.fare = r._committed.fare;
+      logPlayerAction('revert', `还原 ${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata} 本季修改`);
+      saveGame();
+      rerender();
+    });
+  });
   const openBtn = $('#open-route-btn');
   if (openBtn) openBtn.addEventListener('click', openNewRouteDialog);
 }
@@ -455,7 +461,7 @@ function openNewRouteDialog() {
     } else {
       sel.innerHTML = idle.map(ac => {
         const m = AIRCRAFT_BY_ID[ac.modelId];
-        return `<option value="${ac.uid}">${m.name} · ${m.capacity}座 · ${m.rangeKm}km</option>`;
+        return `<option value="${ac.uid}">${m.name} · ${m.capacity}座 · 航程 ${m.rangeKm}km</option>`;
       }).join('');
     }
   };
@@ -507,16 +513,36 @@ function attachFleetHandlers() {
   $$('#tab-body tr[data-uid]').forEach(tr => {
     const uid = tr.dataset.uid;
     tr.querySelector('.a-sell').addEventListener('click', () => {
-      if (!confirm('确认出售？按折旧价回收。')) return;
       const ac = p.aircraft.find(a => a.uid === uid);
+      if (!ac) return;
       const m = AIRCRAFT_BY_ID[ac.modelId];
-      const r = sellAircraft(p, uid);
-      if (r.ok) {
-        toast(`已售出，回收 $${fmt(r.resale)}M`);
-        logPlayerAction('sell', `出售 ${m.name}，回收 $${r.resale.toFixed(1)}M`);
-        saveGame();
-      }
-      rerender();
+      const yrs = ac.ageQuarters / 4;
+      const estResale = Math.max(m.purchasePrice * 0.25, m.purchasePrice * Math.pow(0.95, yrs) * 0.7);
+      openModal({
+        title: `出售 ${m.name}？`,
+        body: `
+          <div class="sell-detail">
+            <div><span class="lbl">机型</span><b>${m.name}</b></div>
+            <div><span class="lbl">原价</span><b>$${m.purchasePrice}M</b></div>
+            <div><span class="lbl">机龄</span><b>${yrs.toFixed(1)} 年</b></div>
+            <div><span class="lbl pos">预计回收</span><b class="pos">$${estResale.toFixed(1)}M</b></div>
+          </div>
+          ${ac.routeId ? '<p class="warn small">⚠️ 这架飞机正在执飞，售出后该航线会变为无飞机。</p>' : ''}
+        `,
+        actions: [
+          { label: '取消', onClick: closeModal },
+          { label: '确认出售', primary: true, onClick: () => {
+            const r = sellAircraft(p, uid);
+            if (r.ok) {
+              toast(`已售出，回收 $${fmt(r.resale)}M`);
+              logPlayerAction('sell', `出售 ${m.name}，回收 $${r.resale.toFixed(1)}M`);
+              saveGame();
+            }
+            closeModal();
+            rerender();
+          } },
+        ],
+      });
     });
   });
   const buyBtn = $('#buy-aircraft-btn');
@@ -570,6 +596,11 @@ function renderCities() {
       case 'region': return (a, b) => dir * (regionLabel(a.region).localeCompare(regionLabel(b.region), 'zh') || a.iata.localeCompare(b.iata));
       case 'size': return (a, b) => dir * (a.size - b.size);
       case 'demand': return (a, b) => dir * (a.baseDemand - b.baseDemand);
+      case 'slots': return (a, b) => {
+        const ua = routesAtCity(a.id) / cityRouteSlots(a);
+        const ub = routesAtCity(b.id) / cityRouteSlots(b);
+        return dir * (ua - ub);
+      };
       case 'status': return (a, b) => {
         const sa = rights.has(a.id) ? 0 : queued.has(a.id) ? 1 : 2;
         const sb = rights.has(b.id) ? 0 : queued.has(b.id) ? 1 : 2;
@@ -590,12 +621,16 @@ function renderCities() {
     const status = rights.has(c.id) ? '<span class="pos">✓ 已拥有</span>'
       : queued.has(c.id) ? `<span class="warn">审批中</span>`
         : `<button class="mini apply-btn" data-id="${c.id}">申请</button>`;
+    const slots = cityRouteSlots(c);
+    const used = routesAtCity(c.id);
+    const slotCls = used >= slots ? 'bad' : used >= slots * 0.8 ? 'warn' : '';
     return `
       <tr>
         <td><a href="#" class="city-link" data-id="${c.id}">${c.nameZh}</a> <span class="muted small">(${c.iata})</span></td>
         <td>${regionLabel(c.region)}</td>
         <td>${'★'.repeat(c.size)}</td>
         <td>${c.baseDemand}</td>
+        <td><span class="${slotCls}">${used} / ${slots}</span></td>
         <td>${status}</td>
       </tr>`;
   }).join('');
@@ -611,11 +646,12 @@ function renderCities() {
           ${headerCell('region', '区域')}
           ${headerCell('size', '规模')}
           ${headerCell('demand', '基础需求')}
+          ${headerCell('slots', '航线槽位')}
           ${headerCell('status', '状态')}
         </tr></thead>
         <tbody>${trs}</tbody>
       </table></div>
-      <p class="muted small">点击表头排序 · 点击城市名查看相关航线</p>
+      <p class="muted small">点击表头排序 · 点击城市名查看相关航线 · 槽位 3★/4★/5★ 分别支持 6/10/15 条航线</p>
     </div>
   `;
 }
@@ -750,38 +786,94 @@ function renderHistory() {
   return `<div class="panel"><h3>已发生事件</h3><ul class="event-list">${items}</ul></div>`;
 }
 
-// ----- 情报 -----
+// ----- 情报 (对手概况) -----
 function renderIntel() {
-  const recent = state.intelLog.slice().reverse();
+  const competitors = state.airlines.filter(a => !a.isPlayer);
+  if (!intelSelectedCompetitor || !competitors.find(a => a.id === intelSelectedCompetitor)) {
+    intelSelectedCompetitor = competitors[0]?.id;
+  }
+  const sel = state.airlines.find(a => a.id === intelSelectedCompetitor);
+
+  let html = `<div class="panel">
+    <h3>📰 对手航司情报</h3>
+    <div class="competitor-tabs">
+      ${competitors.map(al => `
+        <button class="comp-tab ${al.id === intelSelectedCompetitor ? 'active' : ''}" data-aid="${al.id}">
+          <span class="dot" style="background:${al.color}"></span>
+          <span>${al.nameZh}</span>
+        </button>
+      `).join('')}
+    </div>`;
+
+  if (sel) {
+    const totalCap = sel.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].capacity, 0);
+    html += `
+      <div class="competitor-stats">
+        <div><span class="lbl">现金</span><b>$${fmt(sel.cash)}M</b></div>
+        <div><span class="lbl">债务</span><b>$${fmt(sel.debt)}M</b></div>
+        <div><span class="lbl">机队规模</span><b>${sel.aircraft.length} 架 / ${totalCap} 座</b></div>
+        <div><span class="lbl">航线数</span><b>${sel.routes.length}</b></div>
+        <div><span class="lbl">声望</span><b>${Math.round(sel.prestige)}</b></div>
+        <div><span class="lbl">主基地</span><b>${CITY_BY_ID[sel.hubCity].nameZh} (${sel.hubCity})</b></div>
+        ${sel.bankrupt ? '<div class="bad" style="grid-column:1/-1">⚠️ 已破产</div>' : ''}
+      </div>
+      <h4 style="margin:14px 0 6px">机型分布</h4>
+      <div class="muted small">${aircraftBreakdown(sel)}</div>
+      <h4 style="margin:14px 0 6px">航线列表 (${sel.routes.length})</h4>
+      <div class="table-wrap"><table class="game-table">
+        <thead><tr><th>航线</th><th>距离</th><th>机型</th><th>票价</th><th>载荷</th></tr></thead>
+        <tbody>${sel.routes.map(r => {
+          const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
+          const acm = r.aircraftUid ? AIRCRAFT_BY_ID[sel.aircraft.find(x => x.uid === r.aircraftUid)?.modelId]?.name : '<span class="muted">无</span>';
+          return `<tr>
+            <td>${a.iata}-${b.iata} <span class="muted small">${a.nameZh}-${b.nameZh}</span></td>
+            <td>${distanceKm(a, b)}km</td>
+            <td>${acm}</td>
+            <td>$${r.fare}</td>
+            <td>${r.lastLoadFactor ? Math.round(r.lastLoadFactor * 100) + '%' : '—'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      <h4 style="margin:14px 0 6px">最近 4 季度动作</h4>
+      ${renderCompetitorRecentActions(sel.id)}
+    `;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function aircraftBreakdown(al) {
+  const counts = {};
+  for (const ac of al.aircraft) {
+    const m = AIRCRAFT_BY_ID[ac.modelId];
+    counts[m.name] = (counts[m.name] || 0) + 1;
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => `${name} ×${n}`).join(' · ') || '无';
+}
+
+function renderCompetitorRecentActions(airlineId) {
+  const entries = state.intelLog.slice().reverse().slice(0, 4);
+  if (entries.length === 0) return '<p class="muted">无近期动作</p>';
+  const filtered = entries.map(e => ({
+    year: e.year, quarter: e.quarter,
+    items: e.items.filter(it => it.airlineId === airlineId),
+  })).filter(e => e.items.length > 0);
+  if (filtered.length === 0) return '<p class="muted">该对手近期按兵不动</p>';
+  return filtered.map(e => `
+    <div class="intel-quarter">
+      <h4>${e.year} Q${e.quarter}</h4>
+      <ul class="intel-list">${e.items.map(it => `<li>${escapeHtml(it.desc)}</li>`).join('')}</ul>
+    </div>
+  `).join('');
+}
+
+// ----- 策略 (竞争快照 + 建议) -----
+function renderStrategy() {
   const comp = computeCompetition();
   const recs = computeRecommendations();
 
-  let html = `<div class="panel"><h3>📰 对手最近动态</h3>`;
-  if (recent.length === 0) {
-    html += `<p class="muted">还没有情报数据。结束一回合后这里会汇总对手在该季度采取的行动。</p>`;
-  } else {
-    for (const entry of recent.slice(0, 4)) {
-      html += `<div class="intel-quarter"><h4>${entry.year} Q${entry.quarter}</h4>`;
-      if (entry.items.length === 0) {
-        html += `<p class="muted">对手按兵不动。</p>`;
-      } else {
-        const byAirline = {};
-        for (const it of entry.items) (byAirline[it.airlineId] = byAirline[it.airlineId] || []).push(it);
-        html += `<ul class="intel-list">`;
-        for (const [aid, items] of Object.entries(byAirline)) {
-          const al = state.airlines.find(a => a.id === aid);
-          if (!al || al.isPlayer) continue;
-          const descs = items.map(it => escapeHtml(it.desc)).join('；');
-          html += `<li><span class="dot" style="background:${al.color}"></span><b>${al.nameShort}</b>：${descs}</li>`;
-        }
-        html += `</ul>`;
-      }
-      html += `</div>`;
-    }
-  }
-  html += `</div>`;
-
-  html += `<div class="panel"><h3>🎯 航线竞争快照</h3>`;
+  let html = `<div class="panel"><h3>🎯 航线竞争快照</h3>`;
   if (comp.length === 0) {
     html += `<p class="muted">还没有航线。</p>`;
   } else {
@@ -808,7 +900,6 @@ function renderIntel() {
     html += `</ul>`;
   }
   html += `</div>`;
-
   return html;
 }
 
@@ -816,6 +907,12 @@ function attachTabHandlers() {
   if (currentTab === 'routes') attachRouteHandlers();
   else if (currentTab === 'fleet') attachFleetHandlers();
   else if (currentTab === 'cities') attachCitiesHandlers();
+  else if (currentTab === 'intel') {
+    $$('.comp-tab').forEach(b => b.addEventListener('click', () => {
+      intelSelectedCompetitor = b.dataset.aid;
+      renderTabBody();
+    }));
+  }
 }
 
 // ===== 结束季度 =====

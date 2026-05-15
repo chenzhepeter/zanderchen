@@ -123,6 +123,11 @@ input, select { font-size: 14px; }
 }
 .menu-btn:hover { background: var(--primary); color: #fff; }
 
+.end-turn-top {
+  padding: 8px 16px; font-size: 14px;
+  flex-shrink: 0;
+}
+
 .hud {
   display: flex; justify-content: space-between; align-items: center;
   flex: 1; flex-wrap: wrap; gap: 10px;
@@ -138,14 +143,16 @@ input, select { font-size: 14px; }
 .hud-stats .lbl { font-size: 11px; color: var(--muted); }
 .hud-stats .val { font-size: 15px; font-weight: 700; }
 
-/* Map */
+/* Map — width fills game-screen, height by aspect ratio */
 .map-wrap {
   margin-top: 12px; background: var(--card); border-radius: var(--radius);
   padding: 6px; box-shadow: var(--shadow); overflow: hidden;
-  aspect-ratio: 2 / 1;
-  max-height: 56vh;
+  aspect-ratio: 2.4 / 1;
 }
 #world-map { width: 100%; height: 100%; display: block; }
+@media (max-width: 600px) {
+  .map-wrap { aspect-ratio: 2 / 1; }
+}
 
 /* Tabs */
 .tabs {
@@ -168,10 +175,59 @@ input, select { font-size: 14px; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .panel-head h3 { margin: 0; }
 
-/* End-turn area (inline, not fixed) */
-.end-turn-area {
-  display: flex; justify-content: flex-end; padding: 18px 0 8px;
+/* version tag on home */
+.version-tag {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
+
+/* sell aircraft confirm */
+.sell-detail {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin: 12px 0;
+}
+.sell-detail > div {
+  background: #f8fafc; border-radius: 6px;
+  padding: 8px 10px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.sell-detail .lbl { font-size: 12px; color: var(--muted); }
+.sell-detail b { font-size: 15px; }
+.sell-detail b.pos { color: var(--pos); }
+
+/* competitor tabs in intel */
+.competitor-tabs {
+  display: flex; gap: 6px; margin: 8px 0 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+.comp-tab {
+  appearance: none; border: 1px solid var(--border); background: #fff;
+  border-radius: 999px; padding: 6px 12px; cursor: pointer;
+  font-size: 13px; display: inline-flex; align-items: center; gap: 4px;
+}
+.comp-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.comp-tab .dot { width: 8px; height: 8px; }
+
+.competitor-stats {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-bottom: 10px;
+}
+.competitor-stats > div {
+  background: #f8fafc; border-radius: 8px;
+  padding: 8px 10px;
+  display: flex; justify-content: space-between;
+}
+.competitor-stats .lbl { font-size: 12px; color: var(--muted); }
+.competitor-stats b { font-size: 14px; }
+
+/* route revert button styling */
+.route-actions { display: flex; gap: 4px; }
+.r-revert:not(:disabled) { color: var(--primary-dark); }
+.r-revert:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Tables */
 .table-wrap { overflow-x: auto; }
