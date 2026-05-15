@@ -3,17 +3,17 @@ import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
 import { AIRCRAFT, AIRCRAFT_BY_ID } from './data/aircraft.js';
 import {
   buyAircraft, openRoute, assignAircraftToRoute,
-  applyForLanding, setFare,
+  applyForLanding, setFare, closeRoute, recommendedFare,
 } from './sim.js';
 import { logAiAction } from './intel.js';
 
+// AI 配置：保守 / 标准 / 进取
 const PROFILE = {
-  conservative: { riskTolerance: 0.5, cashBuffer: 0.6, maxBuysPerTurn: 1, maxRoutesPerTurn: 1, fareMult: 1.05 },
-  balanced:     { riskTolerance: 1.0, cashBuffer: 0.4, maxBuysPerTurn: 1, maxRoutesPerTurn: 2, fareMult: 1.00 },
-  aggressive:   { riskTolerance: 1.5, cashBuffer: 0.2, maxBuysPerTurn: 2, maxRoutesPerTurn: 2, fareMult: 0.95 },
+  conservative: { cashBuffer: 0.6, maxBuysPerTurn: 1, maxOpensPerTurn: 1, fareMult: 1.05, maxCompetitors: 1 },
+  balanced:     { cashBuffer: 0.4, maxBuysPerTurn: 1, maxOpensPerTurn: 2, fareMult: 1.00, maxCompetitors: 2 },
+  aggressive:   { cashBuffer: 0.2, maxBuysPerTurn: 2, maxOpensPerTurn: 2, fareMult: 0.95, maxCompetitors: 2 },
 };
 
-// AI 主行动入口
 export function runAiTurn() {
   for (const al of state.airlines) {
     if (al.isPlayer || al.bankrupt) continue;
@@ -23,142 +23,132 @@ export function runAiTurn() {
 }
 
 function aiActOnce(al, profile) {
-  // 1) 给闲置飞机分配航线
+  // 1) 闲置飞机 → 为它们开新航线
   for (const ac of al.aircraft) {
     if (ac.routeId || ac.grounded) continue;
-    const route = pickRouteForAircraft(al, ac);
-    if (route) assignAircraftToRoute(al, ac.uid, route.id);
+    const m = AIRCRAFT_BY_ID[ac.modelId];
+    const cand = bestNewRoute(al, m.rangeKm, profile);
+    if (!cand) continue;
+    const fare = Math.round(recommendedFare(al, { fromCity: cand.from, toCity: cand.to }) * profile.fareMult);
+    const r = openRoute(al, cand.from, cand.to, fare, ac.uid);
+    if (r.ok) {
+      const a = CITY_BY_ID[cand.from], b = CITY_BY_ID[cand.to];
+      logAiAction(al.id, 'open', `用 ${m.name} 开通 ${a.iata}-${b.iata} (${cand.dist}km)`);
+    }
   }
 
-  // 2) 调价：如果上季 loadFactor 过低，降价；过高，加价
+  // 2) 调价 — 围绕推荐价（盈亏平衡 ×2）±50% 的区间内调整
   for (const r of al.routes) {
     const oldFare = r.fare;
-    if (r.lastLoadFactor > 0.9) {
-      setFare(al, r.id, r.fare * 1.05);
-      if (Math.abs(r.fare - oldFare) >= 5) {
+    const ideal = recommendedFare(al, r);
+    const upperBound = Math.round(ideal * 1.5);
+    const lowerBound = Math.round(ideal * 0.65);
+    if (r.lastLoadFactor > 0.9 && r.fare < upperBound) {
+      setFare(al, r.id, Math.min(r.fare * 1.05, upperBound));
+      if (r.fare - oldFare >= 5) {
         const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
         logAiAction(al.id, 'fare-up', `上调 ${a.iata}-${b.iata} 票价至 $${r.fare}`);
       }
-    } else if (r.lastLoadFactor < 0.55 && r.lastLoadFactor > 0) {
-      setFare(al, r.id, r.fare * 0.95);
-      if (Math.abs(r.fare - oldFare) >= 5) {
+    } else if (r.lastLoadFactor < 0.5 && r.lastLoadFactor > 0 && r.fare > lowerBound) {
+      setFare(al, r.id, Math.max(r.fare * 0.93, lowerBound));
+      if (oldFare - r.fare >= 5) {
         const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
         logAiAction(al.id, 'fare-down', `下调 ${a.iata}-${b.iata} 票价至 $${r.fare}`);
       }
     }
   }
 
-  // 3) 申请着陆权: 在不重叠的高价值城市
-  if (al.cash > 200) {
-    const candidates = CITIES.filter(c =>
-      !al.landingRights.includes(c.id) &&
-      !state.landingApplications.find(a => a.airlineId === al.id && a.cityId === c.id)
-    ).sort((a, b) => b.baseDemand - a.baseDemand);
-    if (candidates.length > 0) {
-      const target = candidates[0];
-      const r = applyForLanding(al, target.id);
-      if (r.ok) logAiAction(al.id, 'landing', `申请 ${target.nameZh}(${target.iata}) 着陆权（${r.eta} 季审批）`);
+  // 3) 关闭长期亏损 & 拥挤的航线
+  for (const r of [...al.routes]) {
+    const ownerCount = countAirlinesOnPair(r.fromCity, r.toCity);
+    if (r.lastProfit < -1 && ownerCount >= 3) {
+      const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
+      closeRoute(al, r.id);
+      logAiAction(al.id, 'close', `关闭亏损线 ${a.iata}-${b.iata} (拥挤 ${ownerCount} 家)`);
     }
   }
 
-  // 4) 开新航线: 在拥有着陆权的城市间选有空运力的、对手少的
-  for (let i = 0; i < profile.maxRoutesPerTurn; i++) {
-    if (!canExpand(al, profile)) break;
-    const cand = bestNewRoute(al);
-    if (!cand) break;
-    const r = openRoute(al, cand.from, cand.to, Math.round((60 + cand.dist * 0.08) * profile.fareMult));
-    if (r.ok) {
-      const a = CITY_BY_ID[cand.from], b = CITY_BY_ID[cand.to];
-      logAiAction(al.id, 'open', `开通 ${a.iata}-${b.iata} (${cand.dist}km)`);
-      // 立刻分配一架飞机
-      const ac = al.aircraft.find(a => !a.routeId && !a.grounded && AIRCRAFT_BY_ID[a.modelId].rangeKm >= cand.dist);
-      if (ac) {
-        const newR = al.routes[al.routes.length - 1];
-        assignAircraftToRoute(al, ac.uid, newR.id);
-      }
-    } else break;
+  // 4) 申请着陆权（高需求且尚未拥有）
+  if (al.cash > 200) {
+    const candidates = CITIES.filter(c =>
+      !al.landingRights.includes(c.id) &&
+      !state.landingApplications.find(a => a.airlineId === al.id && a.cityId === c.id),
+    ).sort((a, b) => b.baseDemand * b.size - a.baseDemand * a.size);
+    if (candidates.length > 0) {
+      const target = candidates[0];
+      const r = applyForLanding(al, target.id);
+      if (r.ok) logAiAction(al.id, 'landing', `申请 ${target.nameZh}(${target.iata}) 着陆权（${r.eta} 季）`);
+    }
   }
 
-  // 5) 买飞机: 现金充足且有闲置航线时
+  // 5) 买新飞机 + 立刻开新航线
   let bought = 0;
   while (bought < profile.maxBuysPerTurn && canExpand(al, profile)) {
-    const need = countNeededAircraft(al);
-    if (need <= 0) break;
-    const model = pickModel(al);
-    if (!model) break;
-    const r = buyAircraft(al, model.id);
-    if (!r.ok) break;
+    const cand = bestNewRoute(al, Infinity, profile);
+    if (!cand) break;
+    const m = pickModelForDistance(al, cand.dist);
+    if (!m) break;
+    const buyRes = buyAircraft(al, m.id);
+    if (!buyRes.ok) break;
     bought++;
-    logAiAction(al.id, 'buy', `购入 ${model.name} ($${model.purchasePrice}M)`);
-    // 把新飞机扔到最需要的航线
-    const newAc = al.aircraft[al.aircraft.length - 1];
-    const route = pickRouteForAircraft(al, newAc);
-    if (route) assignAircraftToRoute(al, newAc.uid, route.id);
+    const newAc = buyRes.aircraft;
+    const fare = Math.round(recommendedFare(al, { fromCity: cand.from, toCity: cand.to }) * profile.fareMult);
+    const openRes = openRoute(al, cand.from, cand.to, fare, newAc.uid);
+    if (openRes.ok) {
+      const a = CITY_BY_ID[cand.from], b = CITY_BY_ID[cand.to];
+      logAiAction(al.id, 'buy', `购入 ${m.name} 并开 ${a.iata}-${b.iata}`);
+    }
   }
 }
 
 function canExpand(al, profile) {
-  // 现金 > 维护 × buffer * 4 季
   const totalMaint = al.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].maintenancePerQuarter, 0);
   return al.cash > totalMaint * 4 * profile.cashBuffer;
 }
 
-function pickRouteForAircraft(al, ac) {
-  const model = AIRCRAFT_BY_ID[ac.modelId];
-  // 选一条已开但运力不足 (lastLoadFactor 高) 或还没有飞机的航线
-  const candidates = al.routes.filter(r => {
-    const d = distanceKm(CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity]);
-    return model.rangeKm >= d && (r.assignedAircraft.length === 0 || r.lastLoadFactor > 0.85);
-  });
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => b.lastLoadFactor - a.lastLoadFactor);
-  return candidates[0];
-}
-
-function countNeededAircraft(al) {
-  let need = 0;
-  for (const r of al.routes) {
-    if (r.assignedAircraft.length === 0) need++;
-    else if (r.lastLoadFactor > 0.9) need++;
-  }
-  return need;
-}
-
-function pickModel(al) {
+function pickModelForDistance(al, dist) {
   const yr = state.year;
-  // AI 偏好范围合理且 ROI 高的机型
-  const usable = AIRCRAFT.filter(m => yr >= m.availableFrom && yr <= m.availableUntil);
-  // 在现金内能买的、最大载量的
+  const usable = AIRCRAFT.filter(m =>
+    yr >= m.availableFrom && yr <= m.availableUntil && m.rangeKm >= dist,
+  );
   const affordable = usable.filter(m => al.cash >= m.purchasePrice * 1.2);
   if (affordable.length === 0) return null;
-  affordable.sort((a, b) => b.capacity - a.capacity);
-  // 但避免太大: 取中位偏上
+  // 短航线偏小机型，长航线偏大机型
+  if (dist < 3000) affordable.sort((a, b) => a.purchasePrice - b.purchasePrice);
+  else affordable.sort((a, b) => b.capacity - a.capacity);
   return affordable[Math.floor(affordable.length / 3)];
 }
 
-function bestNewRoute(al) {
+// 选最佳新航线：偏向高需求 + 低竞争，尊重已开通避免（同公司）
+function bestNewRoute(al, maxRange, profile) {
   const rights = al.landingRights;
-  const open = new Set(al.routes.map(r => pairKey(r.fromCity, r.toCity)));
+  const ownPairs = new Set(al.routes.map(r => pairKey(r.fromCity, r.toCity)));
   let best = null;
   for (let i = 0; i < rights.length; i++) {
     for (let j = i + 1; j < rights.length; j++) {
-      const k = pairKey(rights[i], rights[j]);
-      if (open.has(k)) continue;
-      const dist = distanceKm(CITY_BY_ID[rights[i]], CITY_BY_ID[rights[j]]);
-      if (dist < 400) continue;
-      const score = (CITY_BY_ID[rights[i]].baseDemand + CITY_BY_ID[rights[j]].baseDemand) / 2 - competitorsOn(rights[i], rights[j]) * 100;
-      if (!best || score > best.score) best = { from: rights[i], to: rights[j], dist, score };
+      const idA = rights[i], idB = rights[j];
+      if (ownPairs.has(pairKey(idA, idB))) continue;  // 同公司同城市对避免
+      const a = CITY_BY_ID[idA], b = CITY_BY_ID[idB];
+      const dist = distanceKm(a, b);
+      if (dist < 400 || dist > maxRange) continue;
+      const competitors = countAirlinesOnPair(idA, idB);
+      if (competitors >= profile.maxCompetitors + 1) continue;  // 过于拥挤直接跳过
+      const hotness = a.baseDemand * a.size + b.baseDemand * b.size;
+      const score = hotness - 250 * competitors;
+      if (!best || score > best.score) best = { from: idA, to: idB, dist, score, competitors };
     }
   }
   return best;
 }
 
-function competitorsOn(a, b) {
-  let n = 0;
+function countAirlinesOnPair(cityA, cityB) {
+  const set = new Set();
   for (const al of state.airlines) {
-    if (al.routes.find(r => (r.fromCity === a && r.toCity === b) || (r.fromCity === b && r.toCity === a))) n++;
+    if (al.routes.some(r => pairKey(r.fromCity, r.toCity) === pairKey(cityA, cityB))) {
+      set.add(al.id);
+    }
   }
-  return n;
+  return set.size;
 }
 
-function pairKey(a, b) { return [a, b].sort().join('_'); }
+function pairKey(a, b) { return [a, b].sort().join('-'); }

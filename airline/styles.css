@@ -37,19 +37,31 @@ input, select { font-size: 14px; }
 .screen { width: 100%; }
 .screen[hidden] { display: none !important; }
 
-/* ===== Start screen ===== */
-#start-screen { padding: 40px 20px; }
+/* ===== Start screen (centered traditional menu) ===== */
+#start-screen {
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px 20px;
+}
 .start-card {
-  max-width: 880px; margin: 0 auto;
+  max-width: 720px; margin: 0 auto;
   background: var(--card); border-radius: var(--radius-lg);
-  padding: 36px 32px; box-shadow: var(--shadow);
+  padding: 44px 36px; box-shadow: var(--shadow);
+  width: 100%;
+}
+.start-card.centered { text-align: center; }
+.start-card .game-title {
+  margin: 0 0 6px; font-size: 40px;
+  letter-spacing: -0.02em;
 }
 .start-card h1 { margin: 0 0 4px; font-size: 32px; }
-.start-card .subtitle { color: var(--primary-dark); font-weight: 600; margin: 0 0 14px; }
-.start-card .hint { color: var(--muted); margin: 0 0 24px; line-height: 1.7; }
-.start-actions {
-  display: flex; flex-direction: column; gap: 12px; max-width: 360px; margin-bottom: 18px;
+.start-card .subtitle { color: var(--primary-dark); font-weight: 600; margin: 0 0 18px; font-size: 16px; }
+.start-card .hint { color: var(--muted); margin: 0 auto 28px; line-height: 1.7; max-width: 500px; }
+.menu-buttons {
+  display: flex; flex-direction: column; gap: 12px;
+  max-width: 320px; margin: 0 auto;
 }
+.menu-buttons button { font-size: 16px; padding: 14px 24px; }
 .airline-pick {
   display: grid; gap: 14px; margin: 6px 0 18px;
   grid-template-columns: 1fr 1fr;
@@ -78,6 +90,7 @@ input, select { font-size: 14px; }
   padding: 10px 14px; background: #fff;
 }
 .slot-card.empty { background: #f8fafc; color: var(--muted); }
+.slot-card.auto { background: #ecfeff; border-color: var(--primary); }
 .slot-card .slot-num {
   font-weight: 700; color: var(--primary-dark);
   background: var(--primary-soft); padding: 4px 10px; border-radius: 6px;
