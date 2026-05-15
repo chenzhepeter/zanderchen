@@ -3,7 +3,7 @@ import { AIRCRAFT_BY_ID } from './data/aircraft.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
 
 export const STORAGE_KEY = 'airline.save';
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 // 单例 GameState — 用模块内可变对象暴露
 export const state = {
@@ -20,6 +20,7 @@ export const state = {
   pendingDialog: null,    // 季度结算弹窗
   landingApplications: [],// {airlineId, cityId, eta}
   lastQuarterReports: {}, // airlineId -> { revenue, fuel, opCost, profit, routes: [...] }
+  intelLog: [],           // 最近 N 个季度的对手动作: [{ tag, year, quarter, items: [{ airlineId, type, desc }] }]
   gameOver: false,
 };
 
@@ -41,6 +42,7 @@ export function initNewGame(playerId) {
   state.pendingDialog = null;
   state.landingApplications = [];
   state.lastQuarterReports = {};
+  state.intelLog = [];
   state.gameOver = false;
   uidCounter = 1;
   routeCounter = 1;
@@ -143,6 +145,7 @@ export function saveGame() {
       pendingDialog: state.pendingDialog,
       landingApplications: state.landingApplications,
       lastQuarterReports: state.lastQuarterReports,
+      intelLog: state.intelLog,
       gameOver: state.gameOver,
       airlines: state.airlines,
     },

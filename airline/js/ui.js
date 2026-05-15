@@ -11,6 +11,7 @@ import {
 } from './sim.js';
 import { runAiTurn } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
+import { computeCompetition, computeRecommendations } from './intel.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -43,6 +44,7 @@ function buildShell() {
         <button class="tab" data-tab="finance">财报</button>
         <button class="tab" data-tab="leaderboard">排行</button>
         <button class="tab" data-tab="history">事件</button>
+        <button class="tab" data-tab="intel">情报</button>
       </nav>
       <section id="tab-body" class="tab-body"></section>
       <div id="action-bar" class="action-bar">
@@ -173,6 +175,7 @@ function renderTabBody() {
   else if (currentTab === 'finance') body.innerHTML = renderFinance();
   else if (currentTab === 'leaderboard') body.innerHTML = renderLeaderboard();
   else if (currentTab === 'history') body.innerHTML = renderHistory();
+  else if (currentTab === 'intel') body.innerHTML = renderIntel();
   attachTabHandlers();
 }
 
@@ -480,6 +483,81 @@ function renderHistory() {
   return `<div class="panel"><h3>已发生事件</h3><ul class="event-list">${items}</ul></div>`;
 }
 
+// ----- 情报 -----
+function renderIntel() {
+  const recent = state.intelLog.slice().reverse();
+  const comp = computeCompetition();
+  const recs = computeRecommendations();
+  const player = getPlayer();
+
+  // 上一季度对手动作
+  let html = `<div class="panel"><h3>📰 对手最近动态</h3>`;
+  if (recent.length === 0) {
+    html += `<p class="muted">还没有情报数据。结束一回合后这里会汇总对手在该季度采取的行动。</p>`;
+  } else {
+    for (const entry of recent.slice(0, 4)) {
+      html += `<div class="intel-quarter"><h4>${entry.year} Q${entry.quarter}</h4>`;
+      if (entry.items.length === 0) {
+        html += `<p class="muted">对手按兵不动。</p>`;
+      } else {
+        // 按航司分组
+        const byAirline = {};
+        for (const it of entry.items) {
+          (byAirline[it.airlineId] = byAirline[it.airlineId] || []).push(it);
+        }
+        html += `<ul class="intel-list">`;
+        for (const [aid, items] of Object.entries(byAirline)) {
+          const al = state.airlines.find(a => a.id === aid);
+          if (!al || al.isPlayer) continue;
+          const descs = items.map(it => escapeHtml(it.desc)).join('；');
+          html += `<li><span class="dot" style="background:${al.color}"></span><b>${al.nameShort}</b>：${descs}</li>`;
+        }
+        html += `</ul>`;
+      }
+      html += `</div>`;
+    }
+  }
+  html += `</div>`;
+
+  // 航线竞争
+  html += `<div class="panel"><h3>🎯 航线竞争快照</h3>`;
+  if (comp.length === 0) {
+    html += `<p class="muted">还没有航线。先去航线标签开通几条。</p>`;
+  } else {
+    html += `<div class="table-wrap"><table class="game-table">
+      <thead><tr><th>航线</th><th>你的份额</th><th>对手</th></tr></thead><tbody>`;
+    for (const c of comp) {
+      const a = CITY_BY_ID[c.route.fromCity], b = CITY_BY_ID[c.route.toCity];
+      const shareCls = c.myShare >= 0.7 ? 'pos' : c.myShare >= 0.4 ? '' : 'warn';
+      const oppText = c.opponents.length === 0
+        ? '<span class="muted">独占</span>'
+        : c.opponents.map(o => `<span class="dot" style="background:${o.color}"></span>${o.name}`).join(' ');
+      html += `<tr>
+        <td>${a.nameZh}-${b.nameZh}</td>
+        <td><span class="${shareCls}">${Math.round(c.myShare * 100)}%</span></td>
+        <td>${oppText}</td>
+      </tr>`;
+    }
+    html += `</tbody></table></div>`;
+  }
+  html += `</div>`;
+
+  // 策略建议
+  html += `<div class="panel"><h3>💡 本季建议</h3>`;
+  if (recs.length === 0) {
+    html += `<p class="muted">运营平稳，暂无紧迫建议。</p>`;
+  } else {
+    html += `<ul class="rec-list">`;
+    for (const r of recs) {
+      html += `<li class="rec rec-${r.severity}"><span class="rec-icon">${r.icon}</span><span>${escapeHtml(r.text)}</span></li>`;
+    }
+    html += `</ul>`;
+  }
+  html += `</div>`;
+
+  return html;
+}
+
 // ----- handlers 路由 -----
 function attachTabHandlers() {
   if (currentTab === 'routes') attachRouteHandlers();
@@ -635,6 +713,10 @@ function toast(msg) {
 }
 
 // ===== utils =====
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
 function fmt(n) {
   if (typeof n !== 'number') return '0';
   if (Math.abs(n) >= 10000) return (n/1000).toFixed(1) + 'k';

@@ -5,6 +5,7 @@ import {
   buyAircraft, openRoute, assignAircraftToRoute,
   applyForLanding, setFare,
 } from './sim.js';
+import { logAiAction } from './intel.js';
 
 const PROFILE = {
   conservative: { riskTolerance: 0.5, cashBuffer: 0.6, maxBuysPerTurn: 1, maxRoutesPerTurn: 1, fareMult: 1.05 },
@@ -31,8 +32,20 @@ function aiActOnce(al, profile) {
 
   // 2) 调价：如果上季 loadFactor 过低，降价；过高，加价
   for (const r of al.routes) {
-    if (r.lastLoadFactor > 0.9) setFare(al, r.id, r.fare * 1.05);
-    else if (r.lastLoadFactor < 0.55 && r.lastLoadFactor > 0) setFare(al, r.id, r.fare * 0.95);
+    const oldFare = r.fare;
+    if (r.lastLoadFactor > 0.9) {
+      setFare(al, r.id, r.fare * 1.05);
+      if (Math.abs(r.fare - oldFare) >= 5) {
+        const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
+        logAiAction(al.id, 'fare-up', `上调 ${a.iata}-${b.iata} 票价至 $${r.fare}`);
+      }
+    } else if (r.lastLoadFactor < 0.55 && r.lastLoadFactor > 0) {
+      setFare(al, r.id, r.fare * 0.95);
+      if (Math.abs(r.fare - oldFare) >= 5) {
+        const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
+        logAiAction(al.id, 'fare-down', `下调 ${a.iata}-${b.iata} 票价至 $${r.fare}`);
+      }
+    }
   }
 
   // 3) 申请着陆权: 在不重叠的高价值城市
@@ -41,18 +54,22 @@ function aiActOnce(al, profile) {
       !al.landingRights.includes(c.id) &&
       !state.landingApplications.find(a => a.airlineId === al.id && a.cityId === c.id)
     ).sort((a, b) => b.baseDemand - a.baseDemand);
-    if (candidates.length > 0) applyForLanding(al, candidates[0].id);
+    if (candidates.length > 0) {
+      const target = candidates[0];
+      const r = applyForLanding(al, target.id);
+      if (r.ok) logAiAction(al.id, 'landing', `申请 ${target.nameZh}(${target.iata}) 着陆权（${r.eta} 季审批）`);
+    }
   }
 
   // 4) 开新航线: 在拥有着陆权的城市间选有空运力的、对手少的
-  let opened = 0;
   for (let i = 0; i < profile.maxRoutesPerTurn; i++) {
     if (!canExpand(al, profile)) break;
     const cand = bestNewRoute(al);
     if (!cand) break;
     const r = openRoute(al, cand.from, cand.to, Math.round((60 + cand.dist * 0.08) * profile.fareMult));
     if (r.ok) {
-      opened++;
+      const a = CITY_BY_ID[cand.from], b = CITY_BY_ID[cand.to];
+      logAiAction(al.id, 'open', `开通 ${a.iata}-${b.iata} (${cand.dist}km)`);
       // 立刻分配一架飞机
       const ac = al.aircraft.find(a => !a.routeId && !a.grounded && AIRCRAFT_BY_ID[a.modelId].rangeKm >= cand.dist);
       if (ac) {
@@ -72,6 +89,7 @@ function aiActOnce(al, profile) {
     const r = buyAircraft(al, model.id);
     if (!r.ok) break;
     bought++;
+    logAiAction(al.id, 'buy', `购入 ${model.name} ($${model.purchasePrice}M)`);
     // 把新飞机扔到最需要的航线
     const newAc = al.aircraft[al.aircraft.length - 1];
     const route = pickRouteForAircraft(al, newAc);
