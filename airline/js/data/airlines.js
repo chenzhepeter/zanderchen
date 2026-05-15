@@ -17,7 +17,7 @@ export const AIRLINES = [
       { modelId: 'A320',  count: 1 },
     ],
     initialRoutes: [
-      ['PEK', 'PVG'], ['PEK', 'SIN'], ['PEK', 'HKG'],
+      ['PEK', 'BOM'], ['PEK', 'SIN'], ['PEK', 'HKG'],
       ['PEK', 'HND'], ['PEK', 'LHR'],
     ],
   },
@@ -27,7 +27,7 @@ export const AIRLINES = [
     nameZh: '达美航空',
     nameShort: '达美',
     country: 'US',
-    hubCity: 'ATL',
+    hubCity: 'JFK',
     color: '#1d4ed8',
     initialCash: 900,
     initialPrestige: 60,
@@ -37,8 +37,8 @@ export const AIRLINES = [
       { modelId: '737NG', count: 2 },
     ],
     initialRoutes: [
-      ['ATL', 'JFK'], ['ATL', 'LAX'], ['ATL', 'MEX'],
-      ['ATL', 'CDG'], ['JFK', 'LHR'],
+      ['JFK', 'LAX'], ['JFK', 'YVR'], ['JFK', 'MEX'],
+      ['JFK', 'CDG'], ['JFK', 'LHR'],
     ],
   },
   {
@@ -77,7 +77,7 @@ export const AIRLINES = [
       { modelId: 'A320', count: 1 },
     ],
     initialRoutes: [
-      ['SIN', 'HKG'], ['SIN', 'BKK'], ['SIN', 'SYD'],
+      ['SIN', 'HKG'], ['SIN', 'BOM'], ['SIN', 'SYD'],
       ['SIN', 'LHR'], ['SIN', 'HND'],
     ],
   },

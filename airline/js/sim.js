@@ -118,101 +118,112 @@ export function applyChoiceOption(option, airline) {
   }
 }
 
-// === 季度模拟 ===
-// 每条航线只挂一架飞机；同一城市对可以有多条独立航线（含同公司多条）。
-// 载荷率核心：市场容量 / 总运力 × 价格吸引力 × 声望微调 × 拥挤度惩罚。
-export function simulateQuarterOperations() {
-  // 先按 city pair 聚合：所有航司、所有航线的总运力 + 按公司分组的运力
-  const pairTotals = {}; // key -> { totalSeats, byOwner: {airlineId: seats}, ownerCount }
-  const routeInfo = [];
+// === 季度模拟 (v9 重写) ===
+// 三大机制：
+//   1. 指数价格弹性  fareIndex = (baseFare/fare)^ELASTICITY_EXP
+//      高价指数级抑制需求；低价反向放大吸引力
+//   2. 拥挤度  pair 上每多 1 家对手，市场总容量额外 -CROWD_SHRINK
+//      把蛋糕做小，避免人多还能各自满载
+//   3. 马太效应  每条航线"吸引力 = 运力 × 价格力 × 声望"，再 ^MATTHEW_EXP
+//      → 价格 / 声望优势的航线吃下不成比例的市场，弱者越弱
+const ELASTICITY_EXP = 1.8;
+const MATTHEW_EXP    = 1.6;
+const CROWD_SHRINK   = 0.25;
 
+export function simulateQuarterOperations() {
+  // Pass 1: 算每条有运力航线的运力 / 价格力 / 吸引力，聚合到 pair
+  const pairs = {};
   for (const al of state.airlines) {
     if (al.bankrupt) continue;
     for (const r of al.routes) {
       const cap = quarterSeatCapacity(al, r);
-      const key = pairKey(r.fromCity, r.toCity);
-      const bucket = pairTotals[key] = pairTotals[key] || { totalSeats: 0, byOwner: {} };
-      bucket.totalSeats += cap;
-      bucket.byOwner[al.id] = (bucket.byOwner[al.id] || 0) + cap;
-      routeInfo.push({ al, r, cap, key });
-    }
-  }
-  // 缓存每条 pair 的不同航司数量
-  for (const key in pairTotals) {
-    pairTotals[key].ownerCount = Object.keys(pairTotals[key].byOwner).length;
-  }
-
-  for (const al of state.airlines) {
-    if (al.bankrupt) { state.lastQuarterReports[al.id] = blankReport(al); continue; }
-    const report = blankReport(al);
-
-    for (const r of al.routes) {
-      const info = routeInfo.find(x => x.al === al && x.r === r);
-      const cap = info.cap;
-      if (cap === 0) { r.lastLoadFactor = 0; r.lastProfit = 0; continue; }
-
+      if (cap === 0) continue;
       const from = CITY_BY_ID[r.fromCity], to = CITY_BY_ID[r.toCity];
       const dist = distanceKm(from, to);
-
-      const distFactor = distanceFactor(dist);
-      const baseDemand = (from.baseDemand + to.baseDemand) / 2 * distFactor;
-      const demandMult = demandMultiplierFor(from, to);
-      const seasonality = seasonalityFactor();
-      const marketSeats = baseDemand * demandMult * seasonality * 30;
-
-      // 价格弹性（相对于"参考票价"）。过高的票价应严重打击需求。
       const baseFare = 60 + dist * 0.08;
-      const fareIndex = clamp(0.08, baseFare / Math.max(20, r.fare), 1.5);
-      const prestigeBoost = 1 + (al.prestige - 50) * 0.0015;
+      const fareIndex = clamp(0.05, Math.pow(baseFare / Math.max(20, r.fare), ELASTICITY_EXP), 2.2);
+      const prestigeBoost = 1 + (al.prestige - 50) * 0.0018;
+      const attrRaw = cap * fareIndex * prestigeBoost;
+      const attrW = Math.pow(attrRaw, MATTHEW_EXP);
 
-      // 拥挤度: 该城市对上的不同航司数量
-      const ownerCount = pairTotals[info.key].ownerCount;
-      const crowdPenalty = 1 / (1 + 0.25 * (ownerCount - 1));
+      const key = pairKey(r.fromCity, r.toCity);
+      const bucket = pairs[key] = pairs[key] || { routes: [], airlineSet: new Set() };
+      bucket.routes.push({ al, r, cap, attrW, from, to, dist });
+      bucket.airlineSet.add(al.id);
+    }
+  }
 
-      // 本航司在该城市对的运力份额（如果同公司多条航线，聚合后份额一致）
-      const myCap = pairTotals[info.key].byOwner[al.id] || 0;
-      const myShareInOwner = myCap > 0 ? cap / myCap : 1;  // 此航线占本公司在该对的份额
-      const myOwnerShare = pairTotals[info.key].totalSeats > 0 ? myCap / pairTotals[info.key].totalSeats : 1;
+  // Pass 2: 每个 pair 算市场容量与总吸引力分母
+  for (const key in pairs) {
+    const b = pairs[key];
+    const sample = b.routes[0];
+    const distFactor = distanceFactor(sample.dist);
+    const baseDemand = (sample.from.baseDemand + sample.to.baseDemand) / 2 * distFactor;
+    const demandMult = demandMultiplierFor(sample.from, sample.to);
+    const seasonality = seasonalityFactor();
+    const ownerCount = b.airlineSet.size;
+    const crowdShrink = 1 / (1 + CROWD_SHRINK * (ownerCount - 1));
+    b.marketSeats = baseDemand * demandMult * seasonality * 30 * crowdShrink;
+    b.totalAttrW = b.routes.reduce((s, x) => s + x.attrW, 0) || 1;
+  }
 
-      // 本航线吸引的乘客 = 市场总容量 × 本公司份额 × 价格 × 声望 × 拥挤度 × (该航线在本公司的比例)
-      const myDemand = Math.min(cap, marketSeats * myOwnerShare * fareIndex * prestigeBoost * crowdPenalty * myShareInOwner);
-      const loadFactor = clamp(0.05, myDemand / cap, 0.95);
+  // 初始化每家航司的 report
+  const reports = {};
+  for (const al of state.airlines) reports[al.id] = blankReport(al);
 
-      r.lastLoadFactor = loadFactor;
-      const passengers = cap * loadFactor;
-      const revenue = passengers * r.fare;  // USD
+  // Pass 3: 按 pair 内的份额计算每条航线的载荷 / 收入 / 利润
+  for (const key in pairs) {
+    const b = pairs[key];
+    for (const x of b.routes) {
+      const share = x.attrW / b.totalAttrW;
+      const myDemand = Math.min(x.cap, b.marketSeats * share);
+      const loadFactor = clamp(0.02, myDemand / x.cap, 0.95);
+      x.r.lastLoadFactor = loadFactor;
 
-      // 燃油（单飞机机型决定燃效）
-      const acModel = airlineAcModelForRoute(al, r);
-      const fuelDistMult = fuelDistanceMultFor(from, to);
-      const fuelCost = passengers * dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.6;
-      const flights = FLIGHTS_PER_QUARTER * (cap > 0 ? 1 : 0);
-      const landingCostM = flights * (5 + (from.size + to.size)) / 1000;
+      const passengers = x.cap * loadFactor;
+      const revenue = passengers * x.r.fare;
+      const acModel = airlineAcModelForRoute(x.al, x.r);
+      const fuelDistMult = fuelDistanceMultFor(x.from, x.to);
+      const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.6;
+      const flights = FLIGHTS_PER_QUARTER;
+      const landingCostM = flights * (5 + (x.from.size + x.to.size)) / 1000;
       const serviceCostM = passengers * 22 / 1e6;
-
       let safetyCostM = 0;
       for (const e of state.activeEffects) {
-        if (e.kind === 'cost') {
-          if (matchesCostScope(e.scope, from, to)) safetyCostM += passengers * e.addPerSeat / 1e6;
+        if (e.kind === 'cost' && matchesCostScope(e.scope, x.from, x.to)) {
+          safetyCostM += passengers * e.addPerSeat / 1e6;
         }
       }
-
       const revenueM = revenue / 1e6;
       const fuelCostM = fuelCost / 1e6;
       const netM = revenueM - fuelCostM - landingCostM - serviceCostM - safetyCostM;
-      r.lastProfit = netM;
+      x.r.lastProfit = netM;
 
-      report.revenue += revenueM;
-      report.fuel += fuelCostM;
-      report.landing += landingCostM;
-      report.service += serviceCostM;
-      report.safety += safetyCostM;
-      report.passengers += passengers;
-      report.routes.push({ routeId: r.id, loadFactor, profit: netM, revenue: revenueM });
+      const rep = reports[x.al.id];
+      rep.revenue += revenueM;
+      rep.fuel += fuelCostM;
+      rep.landing += landingCostM;
+      rep.service += serviceCostM;
+      rep.safety += safetyCostM;
+      rep.passengers += passengers;
+      rep.routes.push({ routeId: x.r.id, loadFactor, profit: netM, revenue: revenueM });
     }
+  }
 
-    al.cash += (report.revenue - report.fuel - report.landing - report.service - report.safety);
-    state.lastQuarterReports[al.id] = report;
+  // 无运力的航线置零
+  for (const al of state.airlines) {
+    if (al.bankrupt) continue;
+    for (const r of al.routes) {
+      if (quarterSeatCapacity(al, r) === 0) { r.lastLoadFactor = 0; r.lastProfit = 0; }
+    }
+  }
+
+  // 营业现金流入账
+  for (const al of state.airlines) {
+    if (al.bankrupt) continue;
+    const rep = reports[al.id];
+    al.cash += (rep.revenue - rep.fuel - rep.landing - rep.service - rep.safety);
+    state.lastQuarterReports[al.id] = rep;
   }
 }
 
@@ -352,7 +363,8 @@ export function processLandingApplications() {
 }
 
 export function checkGameOver() {
-  if (state.year > 2030 || (state.year === 2030 && state.quarter > 4)) state.gameOver = true;
+  // 游戏时长缩短为 2000–2025 (25 年 / 100 季度)
+  if (state.year > 2025 || (state.year === 2025 && state.quarter > 4)) state.gameOver = true;
 }
 
 // === 玩家 / AI 动作 ===

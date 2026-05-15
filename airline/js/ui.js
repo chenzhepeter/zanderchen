@@ -71,7 +71,7 @@ function showStartMenu() {
   root.innerHTML = `
     <div class="start-card centered">
       <h1 class="game-title">✈️ 航空霸业 Lite</h1>
-      <p class="subtitle">2000 → 2030 · 30 年航线经营沙盘</p>
+      <p class="subtitle">2000 → 2025 · 25 年航线经营沙盘</p>
       <p class="hint">亲历 21 世纪初的航空业大事件：9/11、SARS、金融危机、火山灰、新冠、超音速复兴⋯</p>
       <div class="menu-buttons">
         <button class="primary-btn big" id="new-game-btn">🎮 开始新游戏</button>
@@ -205,7 +205,7 @@ function showTutorialModal() {
   openModal({
     title: '欢迎来到航空霸业 Lite',
     body: `
-      <p>你是 <b>${player.nameZh}</b> 的新任 CEO。本游戏共 <b>120 季度（2000 Q1 → 2030 Q4）</b>。</p>
+      <p>你是 <b>${player.nameZh}</b> 的新任 CEO。本游戏共 <b>100 季度（2000 Q1 → 2025 Q4）</b>。</p>
       <ol style="padding-left:1.2em; line-height:1.7">
         <li>每条航线只挂 <b>一架飞机</b>，要更多运力就开多条航线（同城市对可重复）。</li>
         <li>票价用滑块调整：红 → 黄（盈亏平衡） → 绿（高利润）。默认 50% 毛利。</li>
@@ -267,8 +267,8 @@ function renderRoutes() {
     const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
     const dist = distanceKm(a, b);
     const breakEven = computeBreakEvenFare(p, r);
-    const fareMin = Math.max(20, Math.round(breakEven * 0.5));
-    const fareMax = Math.max(fareMin + 50, Math.round(breakEven * 2.8));
+    const fareMin = Math.max(20, Math.round(breakEven * 0.4));
+    const fareMax = Math.max(fareMin + 50, Math.round(breakEven * 5.0));
     const bePct = ((breakEven - fareMin) / (fareMax - fareMin)) * 100;
 
     const curAc = r.aircraftUid ? p.aircraft.find(a => a.uid === r.aircraftUid) : null;
@@ -352,6 +352,7 @@ function attachRouteHandlers() {
       setFare(p, rid, parseInt(slider.value, 10));
       logPlayerAction('fare', `调整 ${CITY_BY_ID[r.fromCity].iata}-${CITY_BY_ID[r.toCity].iata} 票价 $${oldFare} → $${r.fare}`);
       saveGame();
+      rerender();  // 重新渲染以更新还原按钮启用状态
     });
   });
   $$('.r-ac').forEach(sel => {
@@ -1091,7 +1092,7 @@ function showEndGame() {
   const me = scored.find(s => s.al.isPlayer);
   const rank = scored.indexOf(me) + 1;
   openModal({
-    title: '🏆 2030 Q4 · 30 年终局',
+    title: '🏆 2025 Q4 · 25 年终局',
     body: `
       <h3 style="margin:0 0 .5em">你最终排名 第 ${rank} 名</h3>
       <table class="game-table">
