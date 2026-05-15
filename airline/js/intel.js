@@ -75,7 +75,7 @@ export function computeRecommendations() {
   // 3) 现金流
   const totalMaint = p.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].maintenancePerQuarter, 0);
   if (totalMaint > 0) {
-    const runway = p.cash / Math.max(1, totalMaint + p.debt * 0.015);
+    const runway = p.cash / Math.max(1, totalMaint);
     if (p.cash < totalMaint * 3) {
       recs.push({
         severity: 'warn', icon: '🆘',

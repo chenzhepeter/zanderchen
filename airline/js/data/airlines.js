@@ -1,4 +1,4 @@
-// 4 家可选航司。删除 FRA 后用伊比利亚（IBE/MAD）取代汉莎（DLH/FRA）。
+// 4 家可选航司。初始现金 -40%、初始机队 -~40%，更依赖经营赚钱扩张
 
 export const AIRLINES = [
   {
@@ -9,13 +9,12 @@ export const AIRLINES = [
     country: 'CN',
     hubCity: 'PEK',
     color: '#dc2626',
-    initialCash: 1200,
-    initialDebt: 400,
+    initialCash: 720,
     initialPrestige: 50,
     initialFleet: [
-      { modelId: '737NG', count: 6 },
-      { modelId: '767',   count: 3 },
-      { modelId: 'A320',  count: 2 },
+      { modelId: '737NG', count: 4 },
+      { modelId: '767',   count: 2 },
+      { modelId: 'A320',  count: 1 },
     ],
     initialRoutes: [
       ['PEK', 'PVG'], ['PEK', 'SIN'], ['PEK', 'HKG'],
@@ -30,13 +29,12 @@ export const AIRLINES = [
     country: 'US',
     hubCity: 'ATL',
     color: '#1d4ed8',
-    initialCash: 1500,
-    initialDebt: 600,
+    initialCash: 900,
     initialPrestige: 60,
     initialFleet: [
-      { modelId: '757', count: 6 },
-      { modelId: '767', count: 4 },
-      { modelId: '737NG', count: 4 },
+      { modelId: '757', count: 4 },
+      { modelId: '767', count: 2 },
+      { modelId: '737NG', count: 2 },
     ],
     initialRoutes: [
       ['ATL', 'JFK'], ['ATL', 'LAX'], ['ATL', 'MEX'],
@@ -51,13 +49,12 @@ export const AIRLINES = [
     country: 'ES',
     hubCity: 'MAD',
     color: '#f59e0b',
-    initialCash: 1300,
-    initialDebt: 500,
+    initialCash: 780,
     initialPrestige: 55,
     initialFleet: [
-      { modelId: 'A320', count: 5 },
-      { modelId: 'A330', count: 3 },
-      { modelId: '767',  count: 2 },
+      { modelId: 'A320', count: 3 },
+      { modelId: 'A330', count: 2 },
+      { modelId: '767',  count: 1 },
     ],
     initialRoutes: [
       ['MAD', 'LHR'], ['MAD', 'CDG'], ['MAD', 'JFK'],
@@ -72,13 +69,12 @@ export const AIRLINES = [
     country: 'SG',
     hubCity: 'SIN',
     color: '#16a34a',
-    initialCash: 1400,
-    initialDebt: 350,
+    initialCash: 840,
     initialPrestige: 70,
     initialFleet: [
-      { modelId: '777', count: 4 },
-      { modelId: 'A330', count: 4 },
-      { modelId: 'A320', count: 2 },
+      { modelId: '777', count: 2 },
+      { modelId: 'A330', count: 3 },
+      { modelId: 'A320', count: 1 },
     ],
     initialRoutes: [
       ['SIN', 'HKG'], ['SIN', 'BKK'], ['SIN', 'SYD'],

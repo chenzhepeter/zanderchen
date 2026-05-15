@@ -405,9 +405,9 @@ export const EVENTS = [
       { kind: 'demand', scope: 'global', mult: 0.85, durationQuarters: 2, startOffset: 6 },
     ],
     choice: {
-      prompt: '政府提供低息救助贷款 — 是否申请？',
+      prompt: '政府提供一次性救助补贴 — 是否申请？',
       options: [
-        { label: '申请 20 亿低息贷款（增加债务，但避免破产）', applyEffects: [{ kind: 'cashGrant', amount: 2000, debtAdd: 2000 }] },
+        { label: '申请 $1000M 救助补贴（避免破产）', applyEffects: [{ kind: 'cashGrant', amount: 1000 }] },
         { label: '婉拒，自力更生（声望 +10）', applyEffects: [{ kind: 'prestige', delta: 10, target: 'self' }] },
       ],
     },

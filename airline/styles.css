@@ -257,6 +257,8 @@ table.game-table {
 .city-link { color: var(--primary-dark); text-decoration: none; font-weight: 600; }
 .city-link:hover { text-decoration: underline; }
 
+.stars { color: #f59e0b; letter-spacing: 1px; font-weight: 600; }
+
 /* Routes table specific */
 .routes-table .route-name { font-weight: 600; }
 .routes-table .fare-cell { min-width: 200px; }

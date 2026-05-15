@@ -112,7 +112,6 @@ export function applyChoiceOption(option, airline) {
       else if (eff.target === 'all') for (const a of state.airlines) a.prestige += eff.delta;
     } else if (eff.kind === 'cashGrant') {
       airline.cash += eff.amount || 0;
-      airline.debt += eff.debtAdd || 0;
     } else if (eff.kind === 'prestigePerQuarter') {
       airline.prestigePerQuarter += eff.delta || 0;
     }
@@ -221,7 +220,7 @@ function blankReport(al) {
   return {
     airlineId: al.id, revenue: 0, fuel: 0, landing: 0,
     service: 0, safety: 0,
-    maintenance: 0, interest: 0, passengers: 0, routes: [],
+    maintenance: 0, passengers: 0, routes: [],
   };
 }
 
@@ -291,6 +290,7 @@ function seasonalityFactor() {
 function clamp(min, x, max) { return Math.max(min, Math.min(max, x)); }
 
 // === 财务 ===
+// 无债务系统：现金 < 0 时 AI 自动抛售飞机筹资；玩家由 UI 弹窗强制选择。
 export function applyEndOfQuarterFinance() {
   for (const al of state.airlines) {
     if (al.bankrupt) continue;
@@ -299,13 +299,22 @@ export function applyEndOfQuarterFinance() {
     al.cash -= maint;
     state.lastQuarterReports[al.id].maintenance = maint;
 
-    const interest = al.debt * 0.015;
-    al.cash -= interest;
-    state.lastQuarterReports[al.id].interest = interest;
-
     for (const ac of al.aircraft) ac.ageQuarters += 1;
     if (al.prestigePerQuarter) al.prestige += al.prestigePerQuarter;
-    if (al.cash < -2000) al.bankrupt = true;
+
+    // AI 现金告急 → 卖最便宜的飞机直到现金回正或无机可卖
+    if (!al.isPlayer && al.cash < 0) {
+      while (al.cash < 0 && al.aircraft.length > 0) {
+        const sorted = [...al.aircraft].sort((a, b) => {
+          const ma = AIRCRAFT_BY_ID[a.modelId], mb = AIRCRAFT_BY_ID[b.modelId];
+          return ma.purchasePrice - mb.purchasePrice;
+        });
+        sellAircraft(al, sorted[0].uid);
+      }
+      if (al.cash < 0 && al.aircraft.length === 0) al.bankrupt = true;
+    }
+    // 玩家现金 < 0 且无机可卖：UI 端会判定为破产
+    if (al.isPlayer && al.cash < 0 && al.aircraft.length === 0) al.bankrupt = true;
   }
 }
 

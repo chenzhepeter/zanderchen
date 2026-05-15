@@ -234,7 +234,6 @@ function renderHud() {
     </div>
     <div class="hud-stats">
       <div><span class="lbl">现金</span><span class="val">$${fmt(p.cash)}M</span></div>
-      <div><span class="lbl">债务</span><span class="val">$${fmt(p.debt)}M</span></div>
       <div><span class="lbl">机队</span><span class="val">${p.aircraft.length}</span></div>
       <div><span class="lbl">航线</span><span class="val">${p.routes.length}</span></div>
       <div><span class="lbl">声望</span><span class="val">${Math.round(p.prestige)}</span></div>
@@ -594,8 +593,7 @@ function renderCities() {
     switch (cityTabSort.col) {
       case 'name': return (a, b) => dir * a.nameZh.localeCompare(b.nameZh, 'zh');
       case 'region': return (a, b) => dir * (regionLabel(a.region).localeCompare(regionLabel(b.region), 'zh') || a.iata.localeCompare(b.iata));
-      case 'size': return (a, b) => dir * (a.size - b.size);
-      case 'demand': return (a, b) => dir * (a.baseDemand - b.baseDemand);
+      case 'stars': return (a, b) => dir * (a.size - b.size);
       case 'slots': return (a, b) => {
         const ua = routesAtCity(a.id) / cityRouteSlots(a);
         const ub = routesAtCity(b.id) / cityRouteSlots(b);
@@ -628,8 +626,7 @@ function renderCities() {
       <tr>
         <td><a href="#" class="city-link" data-id="${c.id}">${c.nameZh}</a> <span class="muted small">(${c.iata})</span></td>
         <td>${regionLabel(c.region)}</td>
-        <td>${'★'.repeat(c.size)}</td>
-        <td>${c.baseDemand}</td>
+        <td><span class="stars">${'★'.repeat(c.size)}</span></td>
         <td><span class="${slotCls}">${used} / ${slots}</span></td>
         <td>${status}</td>
       </tr>`;
@@ -644,14 +641,13 @@ function renderCities() {
         <thead><tr>
           ${headerCell('name', '城市')}
           ${headerCell('region', '区域')}
-          ${headerCell('size', '规模')}
-          ${headerCell('demand', '基础需求')}
+          ${headerCell('stars', '星级')}
           ${headerCell('slots', '航线槽位')}
           ${headerCell('status', '状态')}
         </tr></thead>
         <tbody>${trs}</tbody>
       </table></div>
-      <p class="muted small">点击表头排序 · 点击城市名查看相关航线 · 槽位 3★/4★/5★ 分别支持 6/10/15 条航线</p>
+      <p class="muted small">点击表头排序 · 点击城市名查看相关航线 · 星级 3★/4★/5★ 分别支持 6/10/15 条航线，且对应不同市场需求</p>
     </div>
   `;
 }
@@ -701,7 +697,7 @@ function showCityRoutes(cityId) {
     title: `${c.nameZh} (${c.iata}) 相关航线`,
     body: `
       <div class="muted small" style="margin-bottom:8px">
-        ${regionLabel(c.region)} · 规模 ${'★'.repeat(c.size)} · 基础需求 ${c.baseDemand}
+        ${regionLabel(c.region)} · <span class="stars">${'★'.repeat(c.size)}</span> · ${routesAtCity(c.id)}/${cityRouteSlots(c)} 槽位
       </div>
       ${rows.length === 0 ? '<p class="muted">目前无任何航司在此城市运营。</p>' : `
         <div class="table-wrap"><table class="game-table">
@@ -736,7 +732,6 @@ function renderFinance() {
         <div class="fin-card neg"><span>客舱服务</span><b>$${fmt(rep.service)}M</b></div>
         <div class="fin-card neg"><span>安保 / 合规</span><b>$${fmt(rep.safety)}M</b></div>
         <div class="fin-card neg"><span>机队维护</span><b>$${fmt(rep.maintenance)}M</b></div>
-        <div class="fin-card neg"><span>债务利息</span><b>$${fmt(rep.interest)}M</b></div>
         <div class="fin-card big ${netProfit(rep) >= 0 ? 'pos' : 'neg'}"><span>净利润</span><b>$${fmt(netProfit(rep))}M</b></div>
       </div>
       <p class="muted">本季载客 ${Math.round(rep.passengers).toLocaleString()} 人次</p>
@@ -744,27 +739,26 @@ function renderFinance() {
   `;
 }
 function netProfit(r) {
-  return r.revenue - r.fuel - r.landing - r.service - r.safety - r.maintenance - r.interest;
+  return r.revenue - r.fuel - r.landing - r.service - r.safety - r.maintenance;
 }
 
 // ----- 排行 -----
 function renderLeaderboard() {
   const scored = state.airlines.map(al => ({
     al,
-    score: al.cash - al.debt + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5,
+    score: al.cash + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5,
   }));
   scored.sort((a, b) => b.score - a.score);
   return `
     <div class="panel">
       <h3>4 家航司排行</h3>
       <table class="game-table">
-        <thead><tr><th>#</th><th>航司</th><th>现金</th><th>债务</th><th>机队</th><th>航线</th><th>声望</th><th>综合分</th></tr></thead>
+        <thead><tr><th>#</th><th>航司</th><th>现金</th><th>机队</th><th>航线</th><th>声望</th><th>综合分</th></tr></thead>
         <tbody>${scored.map((s, i) => `
           <tr class="${s.al.isPlayer ? 'me' : ''}">
             <td>${i + 1}</td>
             <td><span class="dot" style="background:${s.al.color}"></span> ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
             <td>$${fmt(s.al.cash)}M</td>
-            <td>$${fmt(s.al.debt)}M</td>
             <td>${s.al.aircraft.length}</td>
             <td>${s.al.routes.length}</td>
             <td>${Math.round(s.al.prestige)}</td>
@@ -810,7 +804,6 @@ function renderIntel() {
     html += `
       <div class="competitor-stats">
         <div><span class="lbl">现金</span><b>$${fmt(sel.cash)}M</b></div>
-        <div><span class="lbl">债务</span><b>$${fmt(sel.debt)}M</b></div>
         <div><span class="lbl">机队规模</span><b>${sel.aircraft.length} 架 / ${totalCap} 座</b></div>
         <div><span class="lbl">航线数</span><b>${sel.routes.length}</b></div>
         <div><span class="lbl">声望</span><b>${Math.round(sel.prestige)}</b></div>
@@ -946,7 +939,98 @@ function doEndTurn() {
     showEventChoice(choiceEv.id);
     return;
   }
+  // 玩家现金告急 → 强制出售飞机
+  const player = getPlayer();
+  if (player && player.cash < 0 && !player.bankrupt) {
+    showForceSellModal();
+    return;
+  }
   showQuarterReport();
+}
+
+// 现金 < 0 时强制玩家出售飞机
+function showForceSellModal() {
+  const p = getPlayer();
+  if (!p) return;
+  if (p.aircraft.length === 0) {
+    p.bankrupt = true;
+    state.gameOver = true;
+    saveGame();
+    showBankruptcyModal();
+    return;
+  }
+  const renderModal = () => {
+    const rows = p.aircraft.map(ac => {
+      const m = AIRCRAFT_BY_ID[ac.modelId];
+      const yrs = ac.ageQuarters / 4;
+      const estResale = Math.max(m.purchasePrice * 0.25, m.purchasePrice * Math.pow(0.95, yrs) * 0.7);
+      const route = ac.routeId ? p.routes.find(r => r.id === ac.routeId) : null;
+      const routeLabel = route
+        ? `${CITY_BY_ID[route.fromCity].iata}-${CITY_BY_ID[route.toCity].iata}`
+        : '闲置';
+      return `<tr>
+        <td>${m.name}</td>
+        <td>${yrs.toFixed(1)} 年</td>
+        <td>${routeLabel}</td>
+        <td class="pos">$${estResale.toFixed(1)}M</td>
+        <td><button class="primary-btn small force-sell-btn" data-uid="${ac.uid}">出售</button></td>
+      </tr>`;
+    }).join('');
+    openModal({
+      title: '⚠️ 现金告急 — 必须出售飞机',
+      body: `
+        <p class="bad" style="font-size:16px;font-weight:600">
+          当前现金 $${p.cash.toFixed(1)}M
+        </p>
+        <p class="muted small">现金已为负数。请出售飞机直到现金回正。若无机可卖将宣告破产。</p>
+        <div class="table-wrap"><table class="game-table">
+          <thead><tr><th>机型</th><th>机龄</th><th>当前任务</th><th>预计回收</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      `,
+      actions: [],  // 不允许关闭
+    });
+    $$('.force-sell-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        const uid = b.dataset.uid;
+        const ac = p.aircraft.find(a => a.uid === uid);
+        if (!ac) return;
+        const m = AIRCRAFT_BY_ID[ac.modelId];
+        const r = sellAircraft(p, uid);
+        if (!r.ok) return;
+        logPlayerAction('forcesell', `紧急出售 ${m.name}，回收 $${r.resale.toFixed(1)}M`);
+        saveGame();
+        if (p.cash >= 0) {
+          closeModal();
+          rerender();
+          showQuarterReport();
+        } else if (p.aircraft.length === 0) {
+          p.bankrupt = true;
+          state.gameOver = true;
+          saveGame();
+          closeModal();
+          showBankruptcyModal();
+        } else {
+          renderModal();  // 继续选
+        }
+      });
+    });
+  };
+  renderModal();
+}
+
+function showBankruptcyModal() {
+  openModal({
+    title: '💀 公司破产',
+    body: `
+      <p>你的公司已资不抵债，无机可卖、无以为继。</p>
+      <p class="muted">在 ${state.year} Q${state.quarter}，<b>${getPlayer().nameZh}</b> 宣告破产，游戏结束。</p>
+    `,
+    actions: [
+      { label: '回到首页', onClick: () => { clearSave(); closeModal(); showStartMenu(); } },
+      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showAirlinePicker(); } },
+    ],
+  });
 }
 
 function showQuarterReport() {
@@ -991,6 +1075,7 @@ function showEventChoice(eventId) {
         state.pendingEvent = null;
         saveGame();
         closeModal();
+        if (p.cash < 0 && !p.bankrupt) { showForceSellModal(); return; }
         showQuarterReport();
       },
     })),
@@ -1000,7 +1085,7 @@ function showEventChoice(eventId) {
 function showEndGame() {
   const scored = state.airlines.map(al => ({
     al,
-    score: al.cash - al.debt + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5,
+    score: al.cash + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5,
   }));
   scored.sort((a, b) => b.score - a.score);
   const me = scored.find(s => s.al.isPlayer);
