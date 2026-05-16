@@ -118,17 +118,14 @@ export function applyChoiceOption(option, airline) {
   }
 }
 
-// === 季度模拟 (v9 重写) ===
-// 三大机制：
+// === 季度模拟 ===
+// 两大机制（拥挤度缩水已移除，蛋糕大小固定，对手只分走份额）：
 //   1. 指数价格弹性  fareIndex = (baseFare/fare)^ELASTICITY_EXP
 //      高价指数级抑制需求；低价反向放大吸引力
-//   2. 拥挤度  pair 上每多 1 家对手，市场总容量额外 -CROWD_SHRINK
-//      把蛋糕做小，避免人多还能各自满载
-//   3. 马太效应  每条航线"吸引力 = 运力 × 价格力 × 声望"，再 ^MATTHEW_EXP
+//   2. 马太效应  每条航线"吸引力 = 运力 × 价格力 × 声望"，再 ^MATTHEW_EXP
 //      → 价格 / 声望优势的航线吃下不成比例的市场，弱者越弱
 const ELASTICITY_EXP = 1.8;
 const MATTHEW_EXP    = 1.6;
-const CROWD_SHRINK   = 0.25;
 
 export function simulateQuarterOperations() {
   // Pass 1: 算每条有运力航线的运力 / 价格力 / 吸引力，聚合到 pair
@@ -161,9 +158,8 @@ export function simulateQuarterOperations() {
     const baseDemand = (sample.from.baseDemand + sample.to.baseDemand) / 2 * distFactor;
     const demandMult = demandMultiplierFor(sample.from, sample.to);
     const seasonality = seasonalityFactor();
-    const ownerCount = b.airlineSet.size;
-    const crowdShrink = 1 / (1 + CROWD_SHRINK * (ownerCount - 1));
-    b.marketSeats = baseDemand * demandMult * seasonality * 30 * crowdShrink;
+    // 蛋糕大小固定，多家航司共享同一总量（份额由马太效应公式分配）
+    b.marketSeats = baseDemand * demandMult * seasonality * 30;
     b.totalAttrW = b.routes.reduce((s, x) => s + x.attrW, 0) || 1;
   }
 
