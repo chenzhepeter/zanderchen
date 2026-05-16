@@ -296,6 +296,28 @@ function seasonalityFactor() {
 }
 function clamp(min, x, max) { return Math.max(min, Math.min(max, x)); }
 
+// 机队同制造商折扣：全 Boeing 或全 Airbus 时维护费 ×0.9
+// （COMAC C919 视为中立，单一其它厂商也算单一品牌；仅在机队 ≥ 2 架时生效）
+export const FLEET_MAINT_DISCOUNT = 0.10;
+export function fleetMaintDiscountInfo(airline) {
+  if (!airline.aircraft || airline.aircraft.length < 2) {
+    return { eligible: false, brand: null, discount: 0, reason: '机队至少需 2 架' };
+  }
+  const brands = new Set();
+  for (const ac of airline.aircraft) {
+    const m = AIRCRAFT_BY_ID[ac.modelId];
+    brands.add(m.manufacturer);
+  }
+  if (brands.size === 1) {
+    const brand = [...brands][0];
+    if (brand === 'Boeing' || brand === 'Airbus') {
+      return { eligible: true, brand, discount: FLEET_MAINT_DISCOUNT, reason: `全 ${brand} 机队` };
+    }
+    return { eligible: false, brand, discount: 0, reason: `仅 Boeing 或 Airbus 单一品牌可享折扣` };
+  }
+  return { eligible: false, brand: null, discount: 0, reason: `机队含 ${brands.size} 个制造商` };
+}
+
 // === 财务 ===
 // 无债务系统：现金 < 0 时 AI 自动抛售飞机筹资；玩家由 UI 弹窗强制选择。
 export function applyEndOfQuarterFinance() {
@@ -303,8 +325,11 @@ export function applyEndOfQuarterFinance() {
     if (al.bankrupt) continue;
     let maint = 0;
     for (const ac of al.aircraft) maint += AIRCRAFT_BY_ID[ac.modelId].maintenancePerQuarter;
+    const dInfo = fleetMaintDiscountInfo(al);
+    if (dInfo.eligible) maint = maint * (1 - dInfo.discount);
     al.cash -= maint;
     state.lastQuarterReports[al.id].maintenance = maint;
+    state.lastQuarterReports[al.id].maintDiscount = dInfo.eligible ? dInfo : null;
 
     for (const ac of al.aircraft) ac.ageQuarters += 1;
     if (al.prestigePerQuarter) al.prestige += al.prestigePerQuarter;
@@ -496,4 +521,67 @@ export function computeBreakEvenFare(airline, route) {
 // 推荐默认票价：盈亏平衡 × 2.0 (50% 毛利率)
 export function recommendedFare(airline, route) {
   return Math.round(computeBreakEvenFare(airline, route) * 2.0);
+}
+
+// === 事件影响 → 人类可读描述 ===
+const REGION_LABEL = {
+  asia: '亚洲', europe: '欧洲', namerica: '北美', samerica: '南美',
+  mideast: '中东', oceania: '大洋洲', africa: '非洲',
+};
+const COUNTRY_LABEL = {
+  CN: '中国', US: '美国', GB: '英国', FR: '法国', DE: '德国', JP: '日本',
+  HK: '中国香港', SG: '新加坡', IN: '印度', AE: '阿联酋', TR: '土耳其',
+  ES: '西班牙', BR: '巴西', AU: '澳大利亚', RU: '俄罗斯', MX: '墨西哥',
+  CA: '加拿大', ZA: '南非', EG: '埃及', TH: '泰国', IT: '意大利',
+};
+function scopeLabel(scope) {
+  if (!scope || scope === 'global') return '全球';
+  if (scope.startsWith('region:')) return REGION_LABEL[scope.slice(7)] || scope.slice(7);
+  if (scope.startsWith('country:')) return COUNTRY_LABEL[scope.slice(8)] || scope.slice(8);
+  return scope;
+}
+function durLabel(q) {
+  if (!q || q >= 999) return '永久';
+  return `持续 ${q} 季`;
+}
+export function describeEffect(eff) {
+  switch (eff.kind) {
+    case 'demand': {
+      const pct = Math.round((eff.mult - 1) * 100);
+      const sign = pct >= 0 ? '+' : '';
+      const start = eff.startOffset ? ` (延迟 ${eff.startOffset} 季生效)` : '';
+      return `${scopeLabel(eff.scope)} 客流 ${sign}${pct}% (${durLabel(eff.durationQuarters)})${start}`;
+    }
+    case 'fuel': {
+      const pct = Math.round((eff.mult - 1) * 100);
+      const sign = pct >= 0 ? '+' : '';
+      return `全球油价 ${sign}${pct}% (${durLabel(eff.durationQuarters)})`;
+    }
+    case 'fleetGround': {
+      const names = (eff.modelIds || []).map(id => AIRCRAFT_BY_ID[id]?.name || id).join('、');
+      return `${names} 全球停飞 (${durLabel(eff.durationQuarters)})`;
+    }
+    case 'cost': {
+      return `${scopeLabel(eff.scope)} 每座额外成本 +$${eff.addPerSeat} (${durLabel(eff.durationQuarters)})`;
+    }
+    case 'fuelDistance': {
+      const pct = Math.round((eff.mult - 1) * 100);
+      const sign = pct >= 0 ? '+' : '';
+      const regs = (eff.regions || []).map(r => REGION_LABEL[r] || r).join('/');
+      return `${regs} 航线绕飞，油耗 ${sign}${pct}% (${durLabel(eff.durationQuarters)})`;
+    }
+    case 'prestige': {
+      const tgt = eff.target === 'self' ? '玩家' : eff.target === 'all' ? '全部航司' : '随机一家航司';
+      const sign = eff.delta >= 0 ? '+' : '';
+      return `${tgt} 声望 ${sign}${eff.delta}`;
+    }
+    case 'unlock': {
+      return `解锁新机型：${AIRCRAFT_BY_ID[eff.modelId]?.name || eff.modelId}`;
+    }
+    default: return JSON.stringify(eff);
+  }
+}
+export function describeEvent(ev) {
+  const lines = (ev.effects || []).map(describeEffect);
+  return lines;
 }

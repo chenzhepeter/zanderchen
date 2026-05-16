@@ -4,9 +4,9 @@ import { CITIES, CITY_BY_ID, distanceKm, recomputeCityStates } from './data/citi
 
 export const STORAGE_KEY = 'airline.save';
 export const SLOT_KEY = (i) => `airline.slot.${i}`;
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 11;
 export const NUM_SLOTS = 5;
-export const APP_VERSION = '2026.5.16.10';
+export const APP_VERSION = '2026.5.17.1';
 
 // 单例 GameState
 // 注意: route 现在只挂 1 架飞机（route.aircraftUid，可为 null）；同一城市对允许多条独立航线

@@ -500,4 +500,187 @@ export const EVENTS = [
     ],
   },
 
+  // ============== 新增 15 个事件 (补足到 60) ==============
+
+  // 2002: 美航 587 坠机（早期信任危机延续）
+  {
+    id: 'ev_aa587',
+    triggerYear: 2002, triggerQuarter: 1,
+    nameZh: '美航 587 坠机',
+    descZh: 'A300 起飞后垂尾失效坠入皇后区，美国本土航线再蒙阴霾。',
+    effects: [
+      { kind: 'demand', scope: 'country:US', mult: 0.92, durationQuarters: 2 },
+      { kind: 'prestige', delta: -3, target: 'random' },
+    ],
+  },
+
+  // 2004: 雅典奥运会 + 印度洋海啸
+  {
+    id: 'ev_athens_olympics',
+    triggerYear: 2004, triggerQuarter: 3,
+    nameZh: '雅典奥运会',
+    descZh: '雅典举办夏季奥运，南欧客流短期火爆。',
+    effects: [
+      { kind: 'demand', scope: 'region:europe', mult: 1.12, durationQuarters: 1 },
+    ],
+  },
+  {
+    id: 'ev_indian_tsunami',
+    triggerYear: 2004, triggerQuarter: 4,
+    nameZh: '印度洋大海啸',
+    descZh: '苏门答腊岛 9.1 级地震引发海啸，东南亚旅游业重创。',
+    effects: [
+      { kind: 'demand', scope: 'region:asia', mult: 0.78, durationQuarters: 2 },
+      { kind: 'prestige', delta: 3, target: 'all' },
+    ],
+    choice: {
+      prompt: '是否参与人道主义运输（免费包机救灾物资）？',
+      options: [
+        { label: '参与（声望 +6，花费 $80M）', costCash: 80, applyEffects: [{ kind: 'prestige', delta: 6, target: 'self' }] },
+        { label: '不参与', applyEffects: [] },
+      ],
+    },
+  },
+
+  // 2006: A380 首飞延期（订单争议）
+  {
+    id: 'ev_a380_delay',
+    triggerYear: 2006, triggerQuarter: 4,
+    nameZh: 'A380 交付延期',
+    descZh: '空客 A380 接线问题导致量产延期 18 个月，新加坡/阿联酋等订户火大。',
+    effects: [
+      { kind: 'prestige', delta: -2, target: 'random' },
+    ],
+  },
+
+  // 2010: 美国 ATA 破产 + 大型并购前夜
+  {
+    id: 'ev_eyjafjallajokull2',
+    triggerYear: 2010, triggerQuarter: 4,
+    nameZh: '北美极地气旋',
+    descZh: '"炸弹气旋"重创美国东北，机场连日积雪关闭。',
+    effects: [
+      { kind: 'demand', scope: 'country:US', mult: 0.88, durationQuarters: 1 },
+    ],
+  },
+
+  // 2012: 中国高铁普及（替代短线航线）
+  {
+    id: 'ev_chrail',
+    triggerYear: 2012, triggerQuarter: 2,
+    nameZh: '中国高铁网络成型',
+    descZh: '京沪、京广高铁全线通车，国内短途航线竞争加剧。',
+    effects: [
+      { kind: 'demand', scope: 'country:CN', mult: 0.93, durationQuarters: 999 },
+    ],
+  },
+
+  // 2015: 巴黎恐袭
+  {
+    id: 'ev_paris_attack',
+    triggerYear: 2015, triggerQuarter: 4,
+    nameZh: '巴黎 11·13 恐袭',
+    descZh: '巴塔克兰剧院系列恐袭震惊欧洲，国际游客减少。',
+    effects: [
+      { kind: 'demand', scope: 'country:FR', mult: 0.78, durationQuarters: 2 },
+      { kind: 'demand', scope: 'region:europe', mult: 0.92, durationQuarters: 2 },
+    ],
+  },
+
+  // 2016: 英国脱欧公投
+  {
+    id: 'ev_brexit_vote',
+    triggerYear: 2016, triggerQuarter: 2,
+    nameZh: '英国脱欧公投通过',
+    descZh: '52% vs 48% 票选脱欧，英镑暴跌但短期吸引入境游客。',
+    effects: [
+      { kind: 'demand', scope: 'country:GB', mult: 1.10, durationQuarters: 2 },
+    ],
+  },
+
+  // 2017: 印度航空大开放
+  {
+    id: 'ev_india_open',
+    triggerYear: 2017, triggerQuarter: 4,
+    nameZh: '印度民航开放政策',
+    descZh: '印度宣布新的双边航空协定与机场扩张，南亚航线红利期开启。',
+    effects: [
+      { kind: 'demand', scope: 'country:IN', mult: 1.25, durationQuarters: 999 },
+    ],
+  },
+
+  // 2018: 北欧航空联盟改组
+  {
+    id: 'ev_sas_reform',
+    triggerYear: 2018, triggerQuarter: 1,
+    nameZh: '北欧 SAS 重组与劳资冲突',
+    descZh: 'SAS 罢工潮蔓延，斯堪的纳维亚航线短期收益受冲击。',
+    effects: [
+      { kind: 'demand', scope: 'region:europe', mult: 0.96, durationQuarters: 2 },
+    ],
+  },
+
+  // 2020: 全球货运反向暴增（疫情对冲选项）
+  {
+    id: 'ev_cargo_boom',
+    triggerYear: 2020, triggerQuarter: 3,
+    nameZh: '货运需求暴增',
+    descZh: '客机改货机潮兴起，长航线腹舱货运利润率创纪录。',
+    effects: [
+      { kind: 'demand', scope: 'global', mult: 1.15, durationQuarters: 3, startOffset: 0 },
+    ],
+    choice: {
+      prompt: '是否花 $200M 改装 5 架宽体为客货混合？',
+      options: [
+        { label: '改装（额外 +$300M 现金收益）', costCash: 200, applyEffects: [{ kind: 'cashGrant', amount: 300 }] },
+        { label: '不改装', applyEffects: [] },
+      ],
+    },
+  },
+
+  // 2022: 北美劳资紧张 + 飞行员短缺
+  {
+    id: 'ev_pilot_shortage',
+    triggerYear: 2022, triggerQuarter: 3,
+    nameZh: '全球飞行员短缺',
+    descZh: '疫情后飞行员断层，工资飙升，全行业运营成本上涨。',
+    effects: [
+      { kind: 'cost', scope: 'global', addPerSeat: 4, durationQuarters: 999 },
+    ],
+  },
+
+  // 2023: ChatGPT / AI 革命（远程办公 → 商务旅行结构性下降）
+  {
+    id: 'ev_ai_remote',
+    triggerYear: 2023, triggerQuarter: 3,
+    nameZh: 'AI 与远程办公常态化',
+    descZh: '生成式 AI 普及，跨国会议大幅线上化，商务舱需求长期承压。',
+    effects: [
+      { kind: 'demand', scope: 'global', mult: 0.95, durationQuarters: 999 },
+    ],
+  },
+
+  // 2024: 中东双枢纽崛起 + 海湾航司补贴战
+  {
+    id: 'ev_gulf_subsidy',
+    triggerYear: 2024, triggerQuarter: 2,
+    nameZh: '海湾航司补贴战',
+    descZh: '迪拜与多哈航司互相补贴推低票价，中东中转客流暴涨。',
+    effects: [
+      { kind: 'demand', scope: 'region:mideast', mult: 1.20, durationQuarters: 6 },
+    ],
+  },
+
+  // 2025: SAF 强制令（可持续燃料）
+  {
+    id: 'ev_saf_mandate',
+    triggerYear: 2025, triggerQuarter: 4,
+    nameZh: '可持续航空燃料 (SAF) 强制令',
+    descZh: '欧盟与北美强制掺混 SAF，燃油成本结构性上行 8%。',
+    effects: [
+      { kind: 'fuel', mult: 1.08, durationQuarters: 999 },
+      { kind: 'prestige', delta: 2, target: 'all' },
+    ],
+  },
+
 ];

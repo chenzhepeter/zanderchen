@@ -8,10 +8,11 @@ import {
 import { logAiAction } from './intel.js';
 
 // AI 配置：保守 / 标准 / 进取
+// 全局上调买机/开线上限到 3（更激进）
 const PROFILE = {
-  conservative: { cashBuffer: 0.6, maxBuysPerTurn: 1, maxOpensPerTurn: 1, fareMult: 1.05, maxCompetitors: 1 },
-  balanced:     { cashBuffer: 0.4, maxBuysPerTurn: 1, maxOpensPerTurn: 2, fareMult: 1.00, maxCompetitors: 2 },
-  aggressive:   { cashBuffer: 0.2, maxBuysPerTurn: 2, maxOpensPerTurn: 2, fareMult: 0.95, maxCompetitors: 2 },
+  conservative: { cashBuffer: 0.45, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 1.05, maxCompetitors: 2 },
+  balanced:     { cashBuffer: 0.30, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 1.00, maxCompetitors: 3 },
+  aggressive:   { cashBuffer: 0.15, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 0.92, maxCompetitors: 3 },
 };
 
 export function runAiTurn() {
@@ -23,8 +24,10 @@ export function runAiTurn() {
 }
 
 function aiActOnce(al, profile) {
-  // 1) 闲置飞机 → 为它们开新航线
+  let opensThisTurn = 0;
+  // 1) 闲置飞机 → 为它们开新航线（受 maxOpensPerTurn 上限约束）
   for (const ac of al.aircraft) {
+    if (opensThisTurn >= profile.maxOpensPerTurn) break;
     if (ac.routeId || ac.grounded) continue;
     const m = AIRCRAFT_BY_ID[ac.modelId];
     const cand = bestNewRoute(al, m.rangeKm, profile);
@@ -32,6 +35,7 @@ function aiActOnce(al, profile) {
     const fare = Math.round(recommendedFare(al, { fromCity: cand.from, toCity: cand.to }) * profile.fareMult);
     const r = openRoute(al, cand.from, cand.to, fare, ac.uid);
     if (r.ok) {
+      opensThisTurn++;
       const a = CITY_BY_ID[cand.from], b = CITY_BY_ID[cand.to];
       logAiAction(al.id, 'open', `用 ${m.name} 开通 ${a.iata}-${b.iata} (${cand.dist}km)`);
     }

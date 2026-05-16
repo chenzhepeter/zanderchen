@@ -224,10 +224,57 @@ input, select { font-size: 14px; }
 .competitor-stats .lbl { font-size: 12px; color: var(--muted); }
 .competitor-stats b { font-size: 14px; }
 
-/* route revert button styling */
-.route-actions { display: flex; gap: 4px; }
+/* route revert button styling — now a div inside the td, keeps td's vertical-align middle */
+.route-actions {
+  display: inline-flex; gap: 4px; align-items: center; flex-wrap: nowrap;
+}
 .r-revert:not(:disabled) { color: var(--primary-dark); }
 .r-revert:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Routes tab: sort toolbar */
+.route-sort-bar {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.r-sort-btn.active {
+  background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;
+}
+
+/* clickable city-pair link in routes table — full-cell hit area */
+.route-pair-link {
+  display: block; text-decoration: none; color: inherit;
+}
+.route-pair-link .route-name {
+  color: var(--primary-dark); font-weight: 600;
+}
+.route-pair-link:hover .route-name { text-decoration: underline; }
+
+/* Event impact list inside reports/history */
+.event-impact {
+  list-style: none; padding: 0; margin: 6px 0 0;
+}
+.event-impact li {
+  padding: 3px 0 3px 12px; position: relative; font-size: 13px; color: var(--ink);
+  line-height: 1.5;
+}
+.event-impact li::before {
+  content: "→"; position: absolute; left: 0; color: var(--primary);
+}
+.event-impact li.neutral { color: var(--muted); }
+
+/* Fleet manufacturer discount badge */
+.fleet-discount {
+  display: flex; gap: 12px; align-items: center;
+  padding: 10px 12px; border-radius: 8px;
+  margin-bottom: 10px;
+  background: #ecfeff; border-left: 3px solid var(--primary);
+  font-size: 13px;
+}
+.fleet-discount.miss {
+  background: #fff7ed; border-left-color: var(--warn);
+}
+.fleet-discount b { color: var(--primary-dark); }
+.fleet-discount.miss b { color: var(--warn); }
 
 /* Tables */
 .table-wrap { overflow-x: auto; }

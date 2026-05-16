@@ -2,7 +2,7 @@
 // 亚 5 / 中东 2 / 欧 4 / 北美+加 4 / 南美 1 / 大洋 1 / 非 1 = 18
 
 export const DEMAND_BY_SIZE = { 3: 480, 4: 720, 5: 1000 };
-export const SLOTS_BY_SIZE = { 3: 6, 4: 10, 5: 15 };
+export const SLOTS_BY_SIZE = { 3: 6, 4: 8, 5: 12 };
 
 // 2000 年的格局：5 星只属于"区域性龙头"
 //   亚洲: HKG / HND

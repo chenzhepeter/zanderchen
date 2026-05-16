@@ -13,6 +13,8 @@ import {
   assignAircraftToRoute, setFare,
   applyForLanding, computeBreakEvenFare,
   cityRouteSlots, routesAtCity,
+  fleetMaintDiscountInfo, describeEvent,
+  quarterSeatCapacity,
 } from './sim.js';
 import { runAiTurn } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
@@ -23,6 +25,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 let currentTab = 'routes';
 let cityTabSort = { col: 'region', dir: 'asc' };
+let routeTabSort = { col: 'pair', dir: 'asc' };  // pair / dist / profit / load / fare
 let intelSelectedCompetitor = null;  // 选中的对手 airline id
 
 export function bootUi() {
@@ -263,7 +266,25 @@ function renderTabBody() {
 // ----- 航线 -----
 function renderRoutes() {
   const p = getPlayer();
-  const rows = p.routes.map(r => {
+
+  // 排序: 按城市名 / 距离 / 上季利润 / 载荷 / 票价
+  const sortedRoutes = [...p.routes];
+  const dir = routeTabSort.dir === 'desc' ? -1 : 1;
+  sortedRoutes.sort((ra, rb) => {
+    const a1 = CITY_BY_ID[ra.fromCity], b1 = CITY_BY_ID[ra.toCity];
+    const a2 = CITY_BY_ID[rb.fromCity], b2 = CITY_BY_ID[rb.toCity];
+    switch (routeTabSort.col) {
+      case 'dist': return dir * (distanceKm(a1, b1) - distanceKm(a2, b2));
+      case 'profit': return dir * ((ra.lastProfit || 0) - (rb.lastProfit || 0));
+      case 'load': return dir * ((ra.lastLoadFactor || 0) - (rb.lastLoadFactor || 0));
+      case 'fare': return dir * ((ra.fare || 0) - (rb.fare || 0));
+      case 'pair':
+      default:
+        return dir * (a1.nameZh.localeCompare(a2.nameZh, 'zh') || b1.nameZh.localeCompare(b2.nameZh, 'zh'));
+    }
+  });
+
+  const rows = sortedRoutes.map(r => {
     const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
     const dist = distanceKm(a, b);
     const breakEven = computeBreakEvenFare(p, r);
@@ -272,7 +293,6 @@ function renderRoutes() {
     const bePct = ((breakEven - fareMin) / (fareMax - fareMin)) * 100;
 
     const curAc = r.aircraftUid ? p.aircraft.find(a => a.uid === r.aircraftUid) : null;
-    const curAcModel = curAc ? AIRCRAFT_BY_ID[curAc.modelId] : null;
 
     // 可换的飞机选项: 当前 + 闲置且航程足够
     const candidates = p.aircraft.filter(ac => {
@@ -295,8 +315,10 @@ function renderRoutes() {
     return `
       <tr data-route="${r.id}">
         <td>
-          <div class="route-name">${a.nameZh} — ${b.nameZh}</div>
-          <div class="muted small">${dist} km · 盈亏价 $${breakEven}</div>
+          <a href="#" class="route-pair-link" data-from="${r.fromCity}" data-to="${r.toCity}">
+            <div class="route-name">${a.nameZh} — ${b.nameZh}</div>
+            <div class="muted small">${dist} km · 盈亏价 $${breakEven}</div>
+          </a>
         </td>
         <td class="fare-cell">
           <div class="fare-slider-wrap" style="--be-pos:${bePct}%">
@@ -311,17 +333,34 @@ function renderRoutes() {
         <td class="ac-cell">${acSelect}</td>
         <td>${r.lastLoadFactor ? (r.lastLoadFactor * 100).toFixed(0) + '%' : '—'}</td>
         <td class="${r.lastProfit >= 0 ? 'pos' : 'neg'}">$${fmt(r.lastProfit)}M</td>
-        <td class="route-actions">
-          <button class="mini r-revert" data-route="${r.id}" ${modified ? '' : 'disabled'} title="还原本季度修改">↺ 还原</button>
-          <button class="mini r-close" data-route="${r.id}">关闭</button>
+        <td>
+          <div class="route-actions">
+            <button class="mini r-revert" data-route="${r.id}" ${modified ? '' : 'disabled'} title="还原本季度修改">↺ 还原</button>
+            <button class="mini r-close" data-route="${r.id}">关闭</button>
+          </div>
         </td>
       </tr>`;
   }).join('');
+
+  const sortBtn = (col, label) => {
+    const active = routeTabSort.col === col;
+    const arrow = active ? (routeTabSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<button class="mini r-sort-btn ${active ? 'active' : ''}" data-col="${col}">${label}${arrow}</button>`;
+  };
+
   return `
     <div class="panel">
       <div class="panel-head">
         <h3>航线 (${p.routes.length})</h3>
         <button id="open-route-btn" class="primary-btn small">+ 开通新航线</button>
+      </div>
+      <div class="route-sort-bar">
+        <span class="muted small">排序：</span>
+        ${sortBtn('pair', '城市对')}
+        ${sortBtn('dist', '距离')}
+        ${sortBtn('profit', '利润')}
+        ${sortBtn('load', '载荷')}
+        ${sortBtn('fare', '票价')}
       </div>
       <div class="table-wrap"><table class="game-table routes-table">
         <thead><tr>
@@ -330,11 +369,11 @@ function renderRoutes() {
           <th>飞机</th>
           <th>载荷</th>
           <th>上季利润</th>
-          <th></th>
+          <th>操作</th>
         </tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="muted">还没有航线，点右上方"开通新航线"。</td></tr>`}</tbody>
       </table></div>
-      <p class="muted small">提示：每条航线对应 1 架飞机。要增加同城市对运力，可再开一条独立航线。同城市对多家航司同时在飞会显著降低载荷率。</p>
+      <p class="muted small">提示：点击 <b>城市对</b> 名称查看该航段所有航司明细。同城市对可开多条航线增加运力，但多家航司同时在飞会显著降低载荷率。</p>
     </div>
   `;
 }
@@ -406,6 +445,82 @@ function attachRouteHandlers() {
   });
   const openBtn = $('#open-route-btn');
   if (openBtn) openBtn.addEventListener('click', openNewRouteDialog);
+  $$('.r-sort-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const col = btn.dataset.col;
+      if (routeTabSort.col === col) {
+        routeTabSort.dir = routeTabSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        routeTabSort.col = col;
+        // 距离/利润/载荷/票价默认降序更直观，名称默认升序
+        routeTabSort.dir = (col === 'pair') ? 'asc' : 'desc';
+      }
+      renderTabBody();
+    });
+  });
+  $$('.route-pair-link').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      showRoutePairDetail(a.dataset.from, a.dataset.to);
+    });
+  });
+}
+
+// 点击城市对：弹窗显示该航段所有航司的航班明细
+function showRoutePairDetail(fromCityId, toCityId) {
+  const a = CITY_BY_ID[fromCityId], b = CITY_BY_ID[toCityId];
+  if (!a || !b) return;
+  const dist = distanceKm(a, b);
+  const pairK = [fromCityId, toCityId].sort().join('_');
+  // 收集所有航司在该城市对的航线
+  const rows = [];
+  let totalSeats = 0;
+  for (const al of state.airlines) {
+    for (const r of al.routes) {
+      const k = [r.fromCity, r.toCity].sort().join('_');
+      if (k !== pairK) continue;
+      const seats = quarterSeatCapacity(al, r);
+      totalSeats += seats;
+      const ac = r.aircraftUid ? al.aircraft.find(x => x.uid === r.aircraftUid) : null;
+      const acModel = ac ? AIRCRAFT_BY_ID[ac.modelId] : null;
+      rows.push({ al, r, seats, acModel });
+    }
+  }
+  // 按运力降序
+  rows.sort((x, y) => y.seats - x.seats);
+  const tbody = rows.length === 0
+    ? '<tr><td colspan="6" class="muted">暂无任何航司运营此航段。</td></tr>'
+    : rows.map(x => {
+        const share = totalSeats > 0 ? Math.round(x.seats / totalSeats * 100) : 0;
+        const profitCls = x.r.lastProfit >= 0 ? 'pos' : 'neg';
+        const profitTxt = x.r.lastProfit ? `$${fmt(x.r.lastProfit)}M` : '—';
+        const loadTxt = x.r.lastLoadFactor ? Math.round(x.r.lastLoadFactor * 100) + '%' : '—';
+        return `<tr ${x.al.isPlayer ? 'class="me"' : ''}>
+          <td><span class="dot" style="background:${x.al.color}"></span> ${x.al.nameShort}${x.al.isPlayer ? '（你）' : ''}</td>
+          <td>${x.acModel ? x.acModel.name : '<span class="muted">无飞机</span>'}</td>
+          <td>$${x.r.fare}</td>
+          <td>${loadTxt}</td>
+          <td>${x.seats.toLocaleString()} 座 <span class="muted small">(${share}%)</span></td>
+          <td class="${profitCls}">${profitTxt}</td>
+        </tr>`;
+      }).join('');
+  openModal({
+    title: `${a.nameZh} ↔ ${b.nameZh} · 航段明细`,
+    body: `
+      <div class="muted small" style="margin-bottom:10px">
+        距离 <b>${dist} km</b> · 在飞航司 ${rows.length} 家 · 当季总运力 ${totalSeats.toLocaleString()} 座
+      </div>
+      <div class="table-wrap"><table class="game-table">
+        <thead><tr>
+          <th>航司</th><th>机型</th><th>票价</th>
+          <th>载荷</th><th>运力 / 份额</th><th>上季利润</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table></div>
+      <p class="muted small" style="margin-top:8px">运力份额按 (座位 × 航班数) 计算；实际市场份额还会被价格弹性与声望放大。</p>
+    `,
+    actions: [{ label: '关闭', primary: true, onClick: closeModal }],
+  });
 }
 
 function openNewRouteDialog() {
@@ -493,12 +608,52 @@ function renderFleet() {
         <td><button class="mini a-sell">售出</button></td>
       </tr>`;
   }).join('');
+
+  // 机队制造商分布 + 折扣信息
+  const brandCount = {};
+  for (const ac of p.aircraft) {
+    const b = AIRCRAFT_BY_ID[ac.modelId].manufacturer;
+    brandCount[b] = (brandCount[b] || 0) + 1;
+  }
+  const brandList = Object.entries(brandCount).sort((a, b) => b[1] - a[1])
+    .map(([b, n]) => `${b} ×${n}`).join(' · ') || '—';
+  const totalMaintBase = p.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].maintenancePerQuarter, 0);
+  const dInfo = fleetMaintDiscountInfo(p);
+  let discountHtml = '';
+  if (dInfo.eligible) {
+    const saved = totalMaintBase * dInfo.discount;
+    discountHtml = `<div class="fleet-discount">
+      <div style="font-size:22px">🎯</div>
+      <div>
+        <b>制造商折扣已启用：${dInfo.brand} 单一品牌 -${Math.round(dInfo.discount * 100)}% 维护费</b>
+        <div class="muted small">每季节省约 $${saved.toFixed(1)}M（基准维护 $${totalMaintBase.toFixed(1)}M → 实际 $${(totalMaintBase - saved).toFixed(1)}M）</div>
+      </div>
+    </div>`;
+  } else if (p.aircraft.length >= 2) {
+    discountHtml = `<div class="fleet-discount miss">
+      <div style="font-size:22px">💡</div>
+      <div>
+        <b>未触发制造商折扣</b>
+        <div class="muted small">机队当前分布：${brandList}。统一为全 Boeing 或全 Airbus 机队可享 -10% 维护费折扣。</div>
+      </div>
+    </div>`;
+  } else {
+    discountHtml = `<div class="fleet-discount miss">
+      <div style="font-size:22px">💡</div>
+      <div>
+        <b>提示：制造商折扣</b>
+        <div class="muted small">机队全部统一为 Boeing 或 Airbus（至少 2 架）可获得 10% 维护费折扣。</div>
+      </div>
+    </div>`;
+  }
+
   return `
     <div class="panel">
       <div class="panel-head">
         <h3>机队 (${p.aircraft.length})</h3>
         <button id="buy-aircraft-btn" class="primary-btn small">+ 购买飞机</button>
       </div>
+      ${discountHtml}
       <div class="table-wrap"><table class="game-table">
         <thead><tr><th>机型</th><th>规格</th><th>机龄</th><th>当前任务</th><th>操作</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="muted">机队为空，先去购买飞机。</td></tr>'}</tbody>
@@ -648,7 +803,7 @@ function renderCities() {
         </tr></thead>
         <tbody>${trs}</tbody>
       </table></div>
-      <p class="muted small">点击表头排序 · 点击城市名查看相关航线 · 星级 3★/4★/5★ 分别支持 6/10/15 条航线，且对应不同市场需求</p>
+      <p class="muted small">点击表头排序 · 点击城市名查看相关航线 · 星级 3★/4★/5★ 分别支持 6/8/12 条航线槽位，且对应不同市场需求</p>
     </div>
   `;
 }
@@ -776,9 +931,21 @@ function renderHistory() {
   const items = state.eventLog.map(id => {
     const ev = EVENTS.find(e => e.id === id);
     if (!ev) return '';
-    return `<li><b>${ev.triggerYear} Q${ev.triggerQuarter}</b> · ${ev.nameZh}<br><span class="muted">${ev.descZh}</span></li>`;
+    const impacts = describeEvent(ev);
+    const impactList = impacts.length === 0
+      ? '<ul class="event-impact"><li class="neutral">无机制性影响（仅剧情）</li></ul>'
+      : `<ul class="event-impact">${impacts.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
+    return `<li>
+      <b>${ev.triggerYear} Q${ev.triggerQuarter}</b> · ${ev.nameZh}<br>
+      <span class="muted">${ev.descZh}</span>
+      ${impactList}
+    </li>`;
   }).join('');
-  return `<div class="panel"><h3>已发生事件</h3><ul class="event-list">${items}</ul></div>`;
+  return `<div class="panel">
+    <h3>已发生事件 (${state.eventLog.length})</h3>
+    <p class="muted small">每条事件下方列出其对游戏的具体机制影响。</p>
+    <ul class="event-list">${items}</ul>
+  </div>`;
 }
 
 // ----- 情报 (对手概况) -----
@@ -1041,6 +1208,20 @@ function showQuarterReport() {
   if (!rep) { rerender(); return; }
   const triggeredIds = state.pendingDialog?.triggered || [];
   const events = triggeredIds.map(id => EVENTS.find(e => e.id === id)).filter(Boolean);
+  const eventBlock = events.length === 0
+    ? '<p class="muted">本季无重大行业事件。</p>'
+    : '<h4 style="margin-top:1em">本季事件及游戏影响：</h4>'
+      + events.map(e => {
+          const impacts = describeEvent(e);
+          const impactList = impacts.length === 0
+            ? '<ul class="event-impact"><li class="neutral">无机制性影响（仅剧情）</li></ul>'
+            : `<ul class="event-impact">${impacts.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
+          return `<div style="margin:10px 0 12px;padding:10px 12px;background:#f8fafc;border-radius:8px;border-left:3px solid var(--primary)">
+            <b>📰 ${e.nameZh}</b>
+            <div class="muted small" style="margin:4px 0">${e.descZh}</div>
+            ${impactList}
+          </div>`;
+        }).join('');
   openModal({
     title: `${state.year} Q${state.quarter} · 新季度开局`,
     body: `
@@ -1049,10 +1230,7 @@ function showQuarterReport() {
         <div><span class="lbl">载客</span><b>${Math.round(rep.passengers).toLocaleString()}</b></div>
         <div><span class="lbl">现金</span><b>$${fmt(p.cash)}M</b></div>
       </div>
-      ${events.length === 0 ? '<p class="muted">本季无重大行业事件。</p>' :
-      '<h4 style="margin-top:1em">本季事件：</h4><ul>' +
-      events.map(e => `<li><b>${e.nameZh}</b><br><span class="muted">${e.descZh}</span></li>`).join('') +
-      '</ul>'}
+      ${eventBlock}
     `,
     actions: [{
       label: '继续', primary: true, onClick: () => {
@@ -1066,9 +1244,13 @@ function showEventChoice(eventId) {
   const ev = EVENTS.find(e => e.id === eventId);
   if (!ev || !ev.choice) { state.pendingEvent = null; return; }
   const p = getPlayer();
+  const impacts = describeEvent(ev);
+  const impactList = impacts.length === 0
+    ? ''
+    : `<h4 style="margin:.8em 0 .4em">事件影响</h4><ul class="event-impact">${impacts.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
   openModal({
     title: `📰 ${ev.triggerYear} Q${ev.triggerQuarter} · ${ev.nameZh}`,
-    body: `<p>${ev.descZh}</p><p><b>${ev.choice.prompt}</b></p>`,
+    body: `<p>${ev.descZh}</p>${impactList}<p><b>${ev.choice.prompt}</b></p>`,
     actions: ev.choice.options.map(opt => ({
       label: opt.label,
       onClick: () => {
