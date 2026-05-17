@@ -3,6 +3,32 @@ import { CITY_BY_ID, distanceKm, recomputeCityStates, SLOTS_BY_SIZE } from './da
 import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
 
+// === 初始季度财报种子 ===
+// 在 initNewGame 完成后调用一次，让 2000 Q1 开局就能看到"1999 Q4"的财报数据。
+// 跑一次 simulateQuarterOperations，然后还原现金（运营毛利不计入初始资本）。
+export function seedInitialQuarterReport() {
+  // 快照现金
+  const cashSnapshot = {};
+  for (const al of state.airlines) cashSnapshot[al.id] = al.cash;
+  // 模拟一次季度运营
+  simulateQuarterOperations();
+  // 还原现金（不让上一季的盈亏影响开局资本）
+  for (const al of state.airlines) al.cash = cashSnapshot[al.id];
+  // 补充维护费到报表（仅展示，不实际扣款）
+  for (const al of state.airlines) {
+    const rep = state.lastQuarterReports[al.id];
+    if (!rep) continue;
+    let maint = 0;
+    for (const ac of al.aircraft) maint += AIRCRAFT_BY_ID[ac.modelId].maintenancePerQuarter;
+    const dInfo = fleetMaintDiscountInfo(al);
+    if (dInfo.eligible) maint = maint * (1 - dInfo.discount);
+    rep.maintenance = maint;
+    rep.maintDiscount = dInfo.eligible ? dInfo : null;
+  }
+  // 季末提交航线基线快照（"还原"按钮的参考点）
+  commitAllRouteSnapshots();
+}
+
 // === 季度推进总入口 ===
 // aiActFn: AI 例行动作 (买机/开线/调价)
 // aiChoiceFn: AI 对带 choice 的事件做选择 (传入 event, 由 ai.js 处理)

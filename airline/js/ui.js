@@ -13,7 +13,7 @@ import {
   assignAircraftToRoute, setFare,
   applyForLanding, computeBreakEvenFare,
   cityRouteSlots, routesAtCity,
-  fleetMaintDiscountInfo, describeEvent,
+  fleetMaintDiscountInfo, describeEvent, seedInitialQuarterReport,
   quarterSeatCapacity,
 } from './sim.js';
 import { runAiTurn, runAiChoicesForEvent } from './ai.js';
@@ -173,6 +173,7 @@ function showAirlinePicker() {
   $$('.airline-card', root).forEach(b => {
     b.addEventListener('click', () => {
       initNewGame(b.dataset.id);
+      seedInitialQuarterReport();
       saveGame();
       showGameView();
       showTutorialModal();
