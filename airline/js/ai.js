@@ -116,13 +116,21 @@ function aiActOnce(al, profile) {
     }
   }
 
-  // 3) 关闭长期亏损 & 拥挤的航线
+  // 3) 退出逻辑：连续 3 季亏损超过 max(0.5M 绝对线, 10% 总盈利) 才关线
+  // 设计意图：AI 应积极开拓 + 通过调价争取盈利，不轻易撤出。
+  const totalProfit = al.routes.reduce((s, r) => s + (r.lastProfit || 0), 0);
+  // 阈值取 0.5M 与 10% 总盈利的较小者；总盈利 <= 0 时退化为 0（任何亏损都计数）
+  const lossThreshold = Math.max(0, Math.min(0.5, 0.1 * totalProfit));
   for (const r of [...al.routes]) {
-    const ownerCount = countAirlinesOnPair(r.fromCity, r.toCity);
-    if (r.lastProfit < -1 && ownerCount >= 3) {
+    if (r.lastProfit < -lossThreshold) {
+      r._lossStreak = (r._lossStreak || 0) + 1;
+    } else {
+      r._lossStreak = 0;
+    }
+    if (r._lossStreak >= 3) {
       const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
       closeRoute(al, r.id);
-      logAiAction(al.id, 'close', `关闭亏损线 ${a.iata}-${b.iata} (拥挤 ${ownerCount} 家)`);
+      logAiAction(al.id, 'close', `连亏 3 季关闭 ${a.iata}-${b.iata} (上季 $${r.lastProfit.toFixed(1)}M)`);
     }
   }
 

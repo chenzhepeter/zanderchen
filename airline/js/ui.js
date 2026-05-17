@@ -111,7 +111,7 @@ function buildShell() {
         <button class="tab" data-tab="fleet">机队</button>
         <button class="tab" data-tab="cities">城市</button>
         <button class="tab" data-tab="finance">财报</button>
-        <button class="tab" data-tab="leaderboard">排行 / 情报</button>
+        <button class="tab" data-tab="leaderboard">情报</button>
         <button class="tab" data-tab="history">事件</button>
         <button class="tab" data-tab="strategy">策略</button>
       </nav>
@@ -1130,7 +1130,7 @@ function renderLeaderboard() {
 
   return `
     <div class="panel">
-      <h3>航司排行 / 情报 (${scored.length})</h3>
+      <h3>航司情报 (${scored.length})</h3>
       <div class="table-wrap"><table class="game-table leaderboard-table">
         <thead><tr>
           <th>#</th><th>航司</th><th>综合分</th><th>现金</th>
