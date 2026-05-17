@@ -20,6 +20,7 @@ export function seedInitialQuarterReport() {
     if (!rep) continue;
     let maint = 0;
     for (const ac of al.aircraft) maint += AIRCRAFT_BY_ID[ac.modelId].maintenancePerQuarter;
+    maint *= MAINT_FACTOR;
     const dInfo = fleetMaintDiscountInfo(al);
     if (dInfo.eligible) maint = maint * (1 - dInfo.discount);
     rep.maintenance = maint;
@@ -160,6 +161,7 @@ export function applyChoiceOption(option, airline) {
 //      → 价格 / 声望优势的航线吃下不成比例的市场，弱者越弱
 const ELASTICITY_EXP = 1.8;
 const MATTHEW_EXP    = 1.6;
+const MAINT_FACTOR   = 0.65;  // 全局机队维护费打折，使航线盈利更易实现
 
 export function simulateQuarterOperations() {
   // Pass 1: 算每条有运力航线的运力 / 价格力 / 吸引力，聚合到 pair
@@ -207,18 +209,18 @@ export function simulateQuarterOperations() {
     for (const x of b.routes) {
       const share = x.attrW / b.totalAttrW;
       const myDemand = Math.min(x.cap, b.marketSeats * share);
-      const loadFactor = clamp(0.02, myDemand / x.cap, 0.95);
+      const loadFactor = clamp(0.02, myDemand / x.cap, 1.0);
       x.r.lastLoadFactor = loadFactor;
 
       const passengers = x.cap * loadFactor;
       const revenue = passengers * x.r.fare;
       const acModel = airlineAcModelForRoute(x.al, x.r);
       const fuelDistMult = fuelDistanceMultFor(x.from, x.to);
-      const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.6;
+      const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.45;
       const flights = FLIGHTS_PER_QUARTER;
       const landingFeeMult = acModel.landingFeeMult || 1.0;
-      const landingCostM = flights * (5 + (x.from.size + x.to.size)) * landingFeeMult / 1000;
-      const serviceCostM = passengers * 22 / 1e6;
+      const landingCostM = flights * (5 + (x.from.size + x.to.size)) * landingFeeMult / 2500;
+      const serviceCostM = passengers * 12 / 1e6;
       let safetyCostM = 0;
       for (const e of state.activeEffects) {
         if (e.kind === 'cost' && matchesCostScope(e.scope, x.from, x.to)) {
@@ -360,6 +362,7 @@ export function applyEndOfQuarterFinance() {
     if (al.bankrupt) continue;
     let maint = 0;
     for (const ac of al.aircraft) maint += AIRCRAFT_BY_ID[ac.modelId].maintenancePerQuarter;
+    maint *= MAINT_FACTOR;
     const dInfo = fleetMaintDiscountInfo(al);
     if (dInfo.eligible) maint = maint * (1 - dInfo.discount);
     al.cash -= maint;

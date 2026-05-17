@@ -26,7 +26,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 let currentTab = 'routes';
 let cityTabSort = { col: 'region', dir: 'asc' };
 let routeTabSort = { col: 'pair', dir: 'asc' };  // pair / dist / profit / load / fare
-let intelSelectedCompetitor = null;  // 选中的对手 airline id
+let selectedAirlineDetail = null;  // 排行/情报 tab 里展开明细的航司 id
 
 // === 术语词典（点 (?) 时弹出解释，引用 sim.js 真实常量） ===
 const GLOSSARY = {
@@ -111,9 +111,8 @@ function buildShell() {
         <button class="tab" data-tab="fleet">机队</button>
         <button class="tab" data-tab="cities">城市</button>
         <button class="tab" data-tab="finance">财报</button>
-        <button class="tab" data-tab="leaderboard">排行</button>
+        <button class="tab" data-tab="leaderboard">排行 / 情报</button>
         <button class="tab" data-tab="history">事件</button>
-        <button class="tab" data-tab="intel">情报</button>
         <button class="tab" data-tab="strategy">策略</button>
       </nav>
       <section id="tab-body" class="tab-body"></section>
@@ -477,7 +476,6 @@ function renderTabBody() {
   else if (currentTab === 'finance') body.innerHTML = renderFinance();
   else if (currentTab === 'leaderboard') body.innerHTML = renderLeaderboard();
   else if (currentTab === 'history') body.innerHTML = renderHistory();
-  else if (currentTab === 'intel') body.innerHTML = renderIntel();
   else if (currentTab === 'strategy') body.innerHTML = renderStrategy();
   attachTabHandlers();
 }
@@ -1098,29 +1096,84 @@ function netProfit(r) {
   return r.revenue - r.fuel - r.landing - r.service - r.safety - r.maintenance;
 }
 
-// ----- 排行 -----
+// ----- 排行 / 情报 (合并) -----
 function renderLeaderboard() {
   const scored = state.airlines.map(al => ({
     al,
     score: al.cash + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5,
+    seats: al.aircraft.reduce((s, a) => s + (AIRCRAFT_BY_ID[a.modelId]?.capacity || 0), 0),
   }));
   scored.sort((a, b) => b.score - a.score);
+
+  const rows = scored.map((s, i) => {
+    const isSel = selectedAirlineDetail === s.al.id;
+    const hubCity = s.al.hubCity ? CITY_BY_ID[s.al.hubCity] : null;
+    const hubLabel = hubCity ? `${hubCity.nameZh} (${hubCity.iata})` : '<span class="muted">—</span>';
+    return `
+      <tr class="leaderboard-row ${s.al.isPlayer ? 'me' : ''} ${isSel ? 'selected' : ''}" data-aid="${s.al.id}">
+        <td>${i + 1}</td>
+        <td>${airlineChip(s.al)} ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
+        <td><b>${Math.round(s.score)}</b></td>
+        <td>$${fmt(s.al.cash)}M</td>
+        <td>${s.al.aircraft.length}</td>
+        <td>${s.seats}</td>
+        <td>${s.al.routes.length}</td>
+        <td>${Math.round(s.al.prestige)}</td>
+        <td>${hubLabel}</td>
+      </tr>`;
+  }).join('');
+
+  const sel = selectedAirlineDetail ? state.airlines.find(a => a.id === selectedAirlineDetail) : null;
+  const detailHtml = sel ? renderAirlineDetail(sel) : `
+    <p class="muted small" style="margin-top:8px">💡 点击表格中的任意一行查看该航司的航线、机型分布、最近 4 季度动作。</p>
+  `;
+
   return `
     <div class="panel">
-      <h3>航司排行 (${scored.length})</h3>
-      <table class="game-table">
-        <thead><tr><th>#</th><th>航司</th><th>现金</th><th>机队</th><th>航线</th><th>声望</th><th>综合分</th></tr></thead>
-        <tbody>${scored.map((s, i) => `
-          <tr class="${s.al.isPlayer ? 'me' : ''}">
-            <td>${i + 1}</td>
-            <td>${airlineChip(s.al)} ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
-            <td>$${fmt(s.al.cash)}M</td>
-            <td>${s.al.aircraft.length}</td>
-            <td>${s.al.routes.length}</td>
-            <td>${Math.round(s.al.prestige)}</td>
-            <td><b>${Math.round(s.score)}</b></td>
-          </tr>`).join('')}</tbody>
-      </table>
+      <h3>航司排行 / 情报 (${scored.length})</h3>
+      <div class="table-wrap"><table class="game-table leaderboard-table">
+        <thead><tr>
+          <th>#</th><th>航司</th><th>综合分</th><th>现金</th>
+          <th>机队</th><th>座位</th><th>航线</th><th>声望</th><th>主基地</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${detailHtml}
+    </div>
+  `;
+}
+
+// 单一航司的详细面板（不再重复显示统计行，因为表格已经覆盖）
+function renderAirlineDetail(al) {
+  const totalCap = al.aircraft.reduce((s, a) => s + (AIRCRAFT_BY_ID[a.modelId]?.capacity || 0), 0);
+  const routesHtml = al.routes.length === 0
+    ? '<p class="muted">该航司暂无航线。</p>'
+    : `<div class="table-wrap"><table class="game-table">
+        <thead><tr><th>航线</th><th>距离</th><th>机型</th><th>票价</th><th>载荷</th></tr></thead>
+        <tbody>${al.routes.map(r => {
+          const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
+          const acm = r.aircraftUid ? AIRCRAFT_BY_ID[al.aircraft.find(x => x.uid === r.aircraftUid)?.modelId]?.name : '<span class="muted">无</span>';
+          return `<tr>
+            <td>${a.iata}-${b.iata} <span class="muted small">${a.nameZh}-${b.nameZh}</span></td>
+            <td>${distanceKm(a, b)}km</td>
+            <td>${acm}</td>
+            <td>$${r.fare}</td>
+            <td>${r.lastLoadFactor ? Math.round(r.lastLoadFactor * 100) + '%' : '—'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+  return `
+    <div class="airline-detail">
+      <div class="airline-detail-head">
+        <h4>${airlineChip(al)} ${al.nameZh} · 详情</h4>
+        <button class="ghost-btn small" id="airline-detail-close">关闭明细</button>
+      </div>
+      <h5 class="detail-sub">机型分布 <span class="muted small">(${al.aircraft.length} 架 / ${totalCap} 座)</span></h5>
+      <div class="muted small">${aircraftBreakdown(al)}</div>
+      <h5 class="detail-sub">航线列表 (${al.routes.length})</h5>
+      ${routesHtml}
+      <h5 class="detail-sub">最近 4 季度动作</h5>
+      ${renderCompetitorRecentActions(al.id)}
     </div>
   `;
 }
@@ -1146,61 +1199,6 @@ function renderHistory() {
     <p class="muted small">每条事件下方列出其对游戏的具体机制影响。</p>
     <ul class="event-list">${items}</ul>
   </div>`;
-}
-
-// ----- 情报 (对手概况) -----
-function renderIntel() {
-  const competitors = state.airlines.filter(a => !a.isPlayer);
-  if (!intelSelectedCompetitor || !competitors.find(a => a.id === intelSelectedCompetitor)) {
-    intelSelectedCompetitor = competitors[0]?.id;
-  }
-  const sel = state.airlines.find(a => a.id === intelSelectedCompetitor);
-
-  let html = `<div class="panel">
-    <h3>📰 对手航司情报</h3>
-    <div class="competitor-tabs">
-      ${competitors.map(al => `
-        <button class="comp-tab ${al.id === intelSelectedCompetitor ? 'active' : ''}" data-aid="${al.id}">
-          ${airlineChip(al)}
-          <span>${al.nameZh}</span>
-        </button>
-      `).join('')}
-    </div>`;
-
-  if (sel) {
-    const totalCap = sel.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].capacity, 0);
-    html += `
-      <div class="competitor-stats">
-        <div><span class="lbl">现金</span><b>$${fmt(sel.cash)}M</b></div>
-        <div><span class="lbl">机队规模</span><b>${sel.aircraft.length} 架 / ${totalCap} 座</b></div>
-        <div><span class="lbl">航线数</span><b>${sel.routes.length}</b></div>
-        <div><span class="lbl">声望</span><b>${Math.round(sel.prestige)}</b></div>
-        <div><span class="lbl">主基地</span><b>${CITY_BY_ID[sel.hubCity].nameZh} (${sel.hubCity})</b></div>
-        ${sel.bankrupt ? '<div class="bad" style="grid-column:1/-1">⚠️ 已破产</div>' : ''}
-      </div>
-      <h4 style="margin:14px 0 6px">机型分布</h4>
-      <div class="muted small">${aircraftBreakdown(sel)}</div>
-      <h4 style="margin:14px 0 6px">航线列表 (${sel.routes.length})</h4>
-      <div class="table-wrap"><table class="game-table">
-        <thead><tr><th>航线</th><th>距离</th><th>机型</th><th>票价</th><th>载荷</th></tr></thead>
-        <tbody>${sel.routes.map(r => {
-          const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
-          const acm = r.aircraftUid ? AIRCRAFT_BY_ID[sel.aircraft.find(x => x.uid === r.aircraftUid)?.modelId]?.name : '<span class="muted">无</span>';
-          return `<tr>
-            <td>${a.iata}-${b.iata} <span class="muted small">${a.nameZh}-${b.nameZh}</span></td>
-            <td>${distanceKm(a, b)}km</td>
-            <td>${acm}</td>
-            <td>$${r.fare}</td>
-            <td>${r.lastLoadFactor ? Math.round(r.lastLoadFactor * 100) + '%' : '—'}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div>
-      <h4 style="margin:14px 0 6px">最近 4 季度动作</h4>
-      ${renderCompetitorRecentActions(sel.id)}
-    `;
-  }
-  html += `</div>`;
-  return html;
 }
 
 function aircraftBreakdown(al) {
@@ -1275,11 +1273,19 @@ function attachTabHandlers() {
   if (currentTab === 'routes') attachRouteHandlers();
   else if (currentTab === 'fleet') attachFleetHandlers();
   else if (currentTab === 'cities') attachCitiesHandlers();
-  else if (currentTab === 'intel') {
-    $$('.comp-tab').forEach(b => b.addEventListener('click', () => {
-      intelSelectedCompetitor = b.dataset.aid;
+  else if (currentTab === 'leaderboard') {
+    $$('.leaderboard-row').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const aid = tr.dataset.aid;
+        selectedAirlineDetail = (selectedAirlineDetail === aid) ? null : aid;
+        renderTabBody();
+      });
+    });
+    const closeBtn = $('#airline-detail-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => {
+      selectedAirlineDetail = null;
       renderTabBody();
-    }));
+    });
   }
 }
 

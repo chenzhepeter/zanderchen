@@ -361,32 +361,36 @@ input, select { font-size: 14px; }
 .sell-detail b { font-size: 15px; }
 .sell-detail b.pos { color: var(--pos); }
 
-/* competitor tabs in intel */
-.competitor-tabs {
-  display: flex; gap: 6px; margin: 8px 0 14px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
+/* 排行 / 情报合并表：行可点击展开 */
+.leaderboard-table tbody tr.leaderboard-row {
+  cursor: pointer;
+  transition: background 0.12s;
 }
-.comp-tab {
-  appearance: none; border: 1px solid var(--border); background: #fff;
-  border-radius: 999px; padding: 6px 12px; cursor: pointer;
-  font-size: 13px; display: inline-flex; align-items: center; gap: 4px;
+.leaderboard-table tbody tr.leaderboard-row:hover {
+  background: var(--primary-soft);
 }
-.comp-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
-.comp-tab .dot { width: 8px; height: 8px; }
+.leaderboard-table tbody tr.leaderboard-row.selected {
+  background: var(--primary-soft);
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
 
-.competitor-stats {
-  display: grid; gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  margin-bottom: 10px;
+.airline-detail {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border-radius: 10px;
+  border-left: 3px solid var(--primary);
 }
-.competitor-stats > div {
-  background: #f8fafc; border-radius: 8px;
-  padding: 8px 10px;
-  display: flex; justify-content: space-between;
+.airline-detail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
 }
-.competitor-stats .lbl { font-size: 12px; color: var(--muted); }
-.competitor-stats b { font-size: 14px; }
+.airline-detail-head h4 { margin: 0; font-size: 15px; }
+.detail-sub {
+  margin: 12px 0 4px; font-size: 13px; color: var(--muted);
+  font-weight: 600;
+}
 
 /* route revert button styling — now a div inside the td, keeps td's vertical-align middle */
 .route-actions {
