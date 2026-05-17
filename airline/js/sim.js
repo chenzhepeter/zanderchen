@@ -1,17 +1,7 @@
-import { state, commitAllRouteSnapshots, DIFFICULTY } from './state.js';
+import { state, commitAllRouteSnapshots } from './state.js';
 import { CITY_BY_ID, distanceKm, recomputeCityStates, SLOTS_BY_SIZE } from './data/cities.js';
 import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
-
-// 按难度收敛 demand 倍率：把 mult 向 1.0 拉近
-// easy converge=0.30 → mult 0.5 → 0.65；mult 1.5 → 1.35
-// hard converge=-0.10 → mult 0.5 → 0.45（更狠）；mult 1.5 → 1.55
-function convergeDemandMult(mult) {
-  const cfg = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
-  const k = cfg.eventConverge || 0;
-  if (k === 0) return mult;
-  return mult + (1.0 - mult) * k;
-}
 
 // === 季度推进总入口 ===
 // aiActFn: AI 例行动作 (买机/开线/调价)
@@ -55,21 +45,6 @@ export function advanceTime() {
   }
 }
 
-// 查询从 (year, quarter) 起的接下来 N 个季度是否有事件触发
-// 返回数组：每元素为 { year, quarter, count }，仅包含 count>0 的季度
-export function peekUpcomingEvents(fromYear, fromQuarter, lookahead = 4) {
-  const result = [];
-  let y = fromYear, q = fromQuarter;
-  for (let i = 0; i < lookahead; i++) {
-    if (y > 2025 || (y === 2025 && q > 4)) break;
-    const hits = EVENTS.filter(e => e.triggerYear === y && e.triggerQuarter === q && !state.eventLog.includes(e.id));
-    if (hits.length > 0) result.push({ year: y, quarter: q, count: hits.length });
-    q += 1;
-    if (q > 4) { q = 1; y += 1; }
-  }
-  return result;
-}
-
 // === 事件触发 ===
 export function triggerEventsForQuarter() {
   const triggered = [];
@@ -107,7 +82,7 @@ export function applyEventEffects(ev) {
     }
     if (eff.kind === 'demand') {
       state.activeEffects.push({
-        kind: 'demand', scope: eff.scope, mult: convergeDemandMult(eff.mult),
+        kind: 'demand', scope: eff.scope, mult: eff.mult,
         remaining: eff.durationQuarters || 1, startOffset: eff.startOffset || 0,
       });
       continue;
@@ -253,39 +228,6 @@ export function simulateQuarterOperations() {
     const rep = reports[al.id];
     al.cash += (rep.revenue - rep.fuel - rep.landing - rep.service - rep.safety);
     state.lastQuarterReports[al.id] = rep;
-
-    // === 终局分项奖统计累计 ===
-    // totalProfit 包含运营毛利（不含维护，因为维护在 applyEndOfQuarterFinance 单独扣）
-    // loadFactor 用所有非零运力航线的算术平均（每条航线一票）
-    if (!state.careerStats[al.id]) {
-      state.careerStats[al.id] = { totalProfit: 0, totalPassengers: 0, totalFuelLiters: 0, lfSum: 0, lfCount: 0, totalSeatKm: 0 };
-    }
-    const cs = state.careerStats[al.id];
-    cs.totalProfit += (rep.revenue - rep.fuel - rep.landing - rep.service - rep.safety);
-    cs.totalPassengers += rep.passengers;
-    // 总油耗 (升) ≈ revenue / 1e6 反推不方便，直接从 routes 数据再过一遍：
-    for (const r of al.routes) {
-      if (!r.lastLoadFactor) continue;
-      cs.lfSum += r.lastLoadFactor;
-      cs.lfCount += 1;
-    }
-  }
-  // 累计 seat-km + fuel-liters: 第二轮遍历 routes（需要距离 / 飞机 / 载荷）
-  for (const al of state.airlines) {
-    if (al.bankrupt) continue;
-    const cs = state.careerStats[al.id];
-    if (!cs) continue;
-    for (const r of al.routes) {
-      const cap = quarterSeatCapacity(al, r);
-      if (cap === 0 || !r.lastLoadFactor) continue;
-      const a = CITY_BY_ID[r.fromCity], b = CITY_BY_ID[r.toCity];
-      const dist = distanceKm(a, b);
-      const passengers = cap * r.lastLoadFactor;
-      const ac = al.aircraft.find(x => x.uid === r.aircraftUid);
-      const m = ac ? AIRCRAFT_BY_ID[ac.modelId] : null;
-      if (m) cs.totalFuelLiters += passengers * dist * m.fuelPerSeatKm * 0.6;
-      cs.totalSeatKm += passengers * dist;
-    }
   }
 }
 
