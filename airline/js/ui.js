@@ -1,6 +1,6 @@
 import {
   state, getPlayer, saveGame, loadGame, clearSave, initNewGame,
-  saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, NUM_SLOTS, APP_VERSION,
+  saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, NUM_SLOTS, APP_VERSION, SAVE_VERSION,
   logPlayerAction, clearTurnActions, routeIsModified,
 } from './state.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
@@ -16,7 +16,7 @@ import {
   fleetMaintDiscountInfo, describeEvent,
   quarterSeatCapacity,
 } from './sim.js';
-import { runAiTurn } from './ai.js';
+import { runAiTurn, runAiChoicesForEvent } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
 import { computeCompetition, computeRecommendations } from './intel.js';
 
@@ -75,7 +75,7 @@ function showStartMenu() {
     <div class="start-card centered">
       <h1 class="game-title">✈️ 航空霸业 Lite</h1>
       <p class="subtitle">2000 → 2025 · 25 年航线经营沙盘</p>
-      <p class="hint">亲历 21 世纪初的航空业大事件：9/11、SARS、金融危机、火山灰、新冠、超音速复兴⋯</p>
+      <p class="hint">亲历 21 世纪初的航空业大事件：9/11、SARS、金融危机、火山灰、新冠、俄乌冲突⋯</p>
       <div class="menu-buttons">
         <button class="primary-btn big" id="new-game-btn">🎮 开始新游戏</button>
         <button class="ghost-btn big" id="load-game-btn">📂 读取存档</button>
@@ -177,12 +177,19 @@ function attachSlotHandlers(root, mode) {
         else showLoadSlotsScreen();
       } else if (act === 'load') {
         if (!confirm(`读取槽 ${slot} 的存档？当前未保存的进度将丢失。`)) return;
-        if (loadFromSlot(slot)) {
+        const res = loadFromSlot(slot);
+        if (res.ok) {
           saveGame();
           if (mode === 'menu-load') closeModal();
           showGameView();
           toast(`已读取槽 ${slot}`);
-        } else toast('读取失败');
+        } else if (res.reason === 'version') {
+          toast(`存档版本不兼容（v${res.oldVersion}，当前需要 v${SAVE_VERSION}），请新开一局`);
+        } else if (res.reason === 'empty') {
+          toast('该槽位无存档');
+        } else {
+          toast('读取失败：存档损坏');
+        }
       } else if (act === 'delete') {
         if (!confirm(`删除槽 ${slot} 的存档？`)) return;
         deleteSlot(slot);
@@ -1097,7 +1104,7 @@ function onEndTurnConfirm() {
 
 function doEndTurn() {
   clearTurnActions();
-  const triggered = advanceQuarter(runAiTurn);
+  const triggered = advanceQuarter(runAiTurn, runAiChoicesForEvent);
   state.pendingDialog = { type: 'quarter', triggered: triggered.map(e => e.id) };
   saveGame();
   const choiceEv = triggered.find(e => e.choice);

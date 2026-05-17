@@ -4,8 +4,14 @@ import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
 
 // === 季度推进总入口 ===
-export function advanceQuarter(aiActFn) {
+// aiActFn: AI 例行动作 (买机/开线/调价)
+// aiChoiceFn: AI 对带 choice 的事件做选择 (传入 event, 由 ai.js 处理)
+export function advanceQuarter(aiActFn, aiChoiceFn) {
   const triggered = triggerEventsForQuarter();
+  // AI 先消化 choice 事件（玩家由 UI 单独处理）
+  if (aiChoiceFn) {
+    for (const ev of triggered) if (ev.choice) aiChoiceFn(ev);
+  }
   if (aiActFn) aiActFn();
   simulateQuarterOperations();
   applyEndOfQuarterFinance();
@@ -58,12 +64,14 @@ export function applyEventEffects(ev) {
     if (eff.kind === 'prestige') {
       if (eff.target === 'self') {
         const p = state.airlines.find(a => a.id === state.playerId);
-        if (p) p.prestige += eff.delta;
+        if (p && !p.bankrupt) p.prestige += eff.delta;
       } else if (eff.target === 'random') {
-        const a = state.airlines[Math.floor(Math.random() * state.airlines.length)];
+        const candidates = state.airlines.filter(a => !a.bankrupt);
+        if (candidates.length === 0) continue;
+        const a = candidates[Math.floor(Math.random() * candidates.length)];
         a.prestige += eff.delta;
       } else if (eff.target === 'all') {
-        for (const a of state.airlines) a.prestige += eff.delta;
+        for (const a of state.airlines) if (!a.bankrupt) a.prestige += eff.delta;
       }
       continue;
     }
@@ -109,7 +117,7 @@ export function applyChoiceOption(option, airline) {
   for (const eff of option.applyEffects || []) {
     if (eff.kind === 'prestige') {
       if (eff.target === 'self') airline.prestige += eff.delta;
-      else if (eff.target === 'all') for (const a of state.airlines) a.prestige += eff.delta;
+      else if (eff.target === 'all') for (const a of state.airlines) if (!a.bankrupt) a.prestige += eff.delta;
     } else if (eff.kind === 'cashGrant') {
       airline.cash += eff.amount || 0;
     } else if (eff.kind === 'prestigePerQuarter') {

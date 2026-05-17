@@ -51,14 +51,6 @@ export const AIRCRAFT = [
   { id: 'A380',   manufacturer: 'Airbus', name: '空客 A380-800', capacity: 555, rangeKm: 15200,
     fuelPerSeatKm: 0.031, purchasePrice: 445, maintenancePerQuarter: 5.0,
     availableFrom: 2008, availableUntil: 2021, class: 'super' },
-
-  // 未来 / 解锁机型
-  { id: 'ES19',   manufacturer: 'Heart Aerospace', name: 'ES-19 电动支线', capacity: 19, rangeKm: 400,
-    fuelPerSeatKm: 0.005, purchasePrice: 18, maintenancePerQuarter: 0.3,
-    availableFrom: 2026, availableUntil: 2030, class: 'electric' },
-  { id: 'OVTR',   manufacturer: 'Boom', name: 'Overture 超音速', capacity: 80, rangeKm: 7800,
-    fuelPerSeatKm: 0.072, purchasePrice: 200, maintenancePerQuarter: 3.5,
-    availableFrom: 2029, availableUntil: 2030, class: 'supersonic' },
 ];
 
 export const AIRCRAFT_BY_ID = Object.fromEntries(AIRCRAFT.map(a => [a.id, a]));

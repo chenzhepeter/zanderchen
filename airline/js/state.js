@@ -119,7 +119,8 @@ export function initNewGame(playerId) {
 }
 
 function pickAiProfile(id) {
-  const map = { CCA: 'aggressive', DAL: 'balanced', DLH: 'conservative', SIA: 'balanced' };
+  // 4 家航司: CCA 进取 / DAL 平衡 / IBE 保守 / SIA 平衡
+  const map = { CCA: 'aggressive', DAL: 'balanced', IBE: 'conservative', SIA: 'balanced' };
   return map[id] || 'balanced';
 }
 
@@ -173,25 +174,31 @@ function buildPayload() {
   };
 }
 
+// 返回 { ok: true } / { ok: false, reason: 'version'|'corrupt', oldVersion? }
 function applyPayload(p) {
-  if (!p || p.version !== SAVE_VERSION) return false;
+  if (!p) return { ok: false, reason: 'corrupt' };
+  if (p.version !== SAVE_VERSION) {
+    console.warn(`Save version mismatch: got v${p.version}, expected v${SAVE_VERSION}`);
+    return { ok: false, reason: 'version', oldVersion: p.version };
+  }
   Object.assign(state, p.state);
   if (!state.thisTurnActions) state.thisTurnActions = [];
   uidCounter = p.counters?.uid || 1;
   routeCounter = p.counters?.route || 1;
-  return true;
+  return { ok: true };
 }
 
 export function saveGame() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPayload())); return true; }
   catch (e) { console.warn('save failed', e); return false; }
 }
+// 返回 { ok, reason?, oldVersion? } —— UI 据此区分"无存档/版本不兼容/解析失败"
 export function loadGame() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
+    if (!raw) return { ok: false, reason: 'empty' };
     return applyPayload(JSON.parse(raw));
-  } catch (e) { console.warn('load failed', e); return false; }
+  } catch (e) { console.warn('load failed', e); return { ok: false, reason: 'corrupt' }; }
 }
 export function clearSave() { try { localStorage.removeItem(STORAGE_KEY); } catch {} }
 export function hasSave() { try { return !!localStorage.getItem(STORAGE_KEY); } catch { return false; } }
@@ -202,12 +209,12 @@ export function saveToSlot(slot) {
   catch (e) { console.warn('save slot failed', e); return false; }
 }
 export function loadFromSlot(slot) {
-  if (slot < 1 || slot > NUM_SLOTS) return false;
+  if (slot < 1 || slot > NUM_SLOTS) return { ok: false, reason: 'empty' };
   try {
     const raw = localStorage.getItem(SLOT_KEY(slot));
-    if (!raw) return false;
+    if (!raw) return { ok: false, reason: 'empty' };
     return applyPayload(JSON.parse(raw));
-  } catch (e) { console.warn('load slot failed', e); return false; }
+  } catch (e) { console.warn('load slot failed', e); return { ok: false, reason: 'corrupt' }; }
 }
 export function deleteSlot(slot) {
   if (slot < 1 || slot > NUM_SLOTS) return false;

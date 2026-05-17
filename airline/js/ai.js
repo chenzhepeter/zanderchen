@@ -4,6 +4,7 @@ import { AIRCRAFT, AIRCRAFT_BY_ID } from './data/aircraft.js';
 import {
   buyAircraft, openRoute, assignAircraftToRoute,
   applyForLanding, setFare, closeRoute, recommendedFare,
+  applyChoiceOption,
 } from './sim.js';
 import { logAiAction } from './intel.js';
 
@@ -21,6 +22,59 @@ export function runAiTurn() {
     const profile = PROFILE[al.aiProfile] || PROFILE.balanced;
     aiActOnce(al, profile);
   }
+}
+
+// 给每家 AI 应用 choice 事件（玩家走 UI 弹窗，AI 走这里）
+// 按性格倾向打分选项；进取派偏行动 + 声望，保守派偏接受救助 / 不花钱
+export function runAiChoicesForEvent(event) {
+  if (!event || !event.choice || !event.choice.options) return;
+  for (const al of state.airlines) {
+    if (al.isPlayer || al.bankrupt) continue;
+    const profile = al.aiProfile || 'balanced';
+    const chosen = scoreChoiceOption(event.choice.options, profile, al);
+    if (!chosen) continue;
+    // 现金不够付 costCash 时降级到无成本选项（找一个 costCash=0 的）
+    if (chosen.costCash && al.cash < chosen.costCash) {
+      const fallback = event.choice.options.find(o => !o.costCash);
+      if (fallback) {
+        applyChoiceOption(fallback, al);
+        logAiAction(al.id, 'choice', `事件「${event.nameZh}」(现金不足) 选: ${fallback.label}`);
+        continue;
+      }
+    }
+    applyChoiceOption(chosen, al);
+    logAiAction(al.id, 'choice', `事件「${event.nameZh}」选: ${chosen.label}`);
+  }
+}
+
+function scoreChoiceOption(options, profile, airline) {
+  let best = null, bestScore = -Infinity;
+  for (const opt of options) {
+    const cost = opt.costCash || 0;
+    const hasGrant = (opt.applyEffects || []).some(e => e.kind === 'cashGrant');
+    const hasSelfPrestige = (opt.applyEffects || []).some(e => e.kind === 'prestige' && e.target === 'self' && (e.delta || 0) > 0);
+    let score = 0;
+    if (profile === 'aggressive') {
+      // 进取：偏向行动 + 自我声望，少拿救助
+      score += cost > 0 ? 2 : 0;
+      score += hasSelfPrestige ? 2 : 0;
+      score -= hasGrant ? 1.5 : 0;
+      score -= cost / 500;
+    } else if (profile === 'conservative') {
+      // 保守：偏向救助 / 不花钱
+      score += hasGrant ? 3 : 0;
+      score -= cost / 100;
+      score += !cost && !hasGrant ? 0.5 : 0;
+    } else {
+      // 平衡：温和倾向声望和救助
+      score += hasSelfPrestige ? 1 : 0;
+      score += hasGrant ? 1 : 0;
+      score -= cost / 300;
+    }
+    score += Math.random() * 0.4;  // 小幅扰动，避免完全机械
+    if (score > bestScore) { bestScore = score; best = opt; }
+  }
+  return best;
 }
 
 function aiActOnce(al, profile) {

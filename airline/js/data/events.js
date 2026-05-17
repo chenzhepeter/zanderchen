@@ -1,4 +1,4 @@
-// 45 个历史事件，跨 2000–2029，平均每 ~3 季度一次
+// 60 个历史事件，跨 2000–2025，平均每 ~1.5 季度一次
 // 触发条件: triggerYear + triggerQuarter
 // effects: 见 sim.js 的 applyEventEffects
 //   - { kind: 'demand', scope: 'global'|'region:asia'|'country:US'|'cityPair:[A,B]', mult, durationQuarters, startOffset? }
@@ -207,7 +207,6 @@ export const EVENTS = [
     descZh: '突尼斯、埃及、利比亚相继爆发抗议，中东与北非旅行受冲击。',
     effects: [
       { kind: 'demand', scope: 'region:mideast', mult: 0.75, durationQuarters: 3 },
-      { kind: 'demand', scope: 'country:EG', mult: 0.50, durationQuarters: 4 },
     ],
   },
   {
@@ -265,7 +264,7 @@ export const EVENTS = [
     nameZh: '超强台风海燕',
     descZh: '海燕横扫菲律宾，造成严重伤亡，东南亚航线短期受挫。',
     effects: [
-      { kind: 'demand', scope: 'country:TH', mult: 0.85, durationQuarters: 1 },
+      { kind: 'demand', scope: 'region:asia', mult: 0.92, durationQuarters: 1 },
     ],
   },
 
@@ -359,7 +358,7 @@ export const EVENTS = [
     nameZh: '俄罗斯世界杯',
     descZh: '俄罗斯举办世界杯，莫斯科航线短期火爆。',
     effects: [
-      { kind: 'demand', scope: 'country:RU', mult: 1.40, durationQuarters: 1 },
+      { kind: 'demand', scope: 'region:europe', mult: 1.10, durationQuarters: 1 },
     ],
   },
   {
@@ -433,7 +432,6 @@ export const EVENTS = [
     effects: [
       { kind: 'fuel', mult: 1.40, durationQuarters: 6 },
       { kind: 'fuelDistance', regions: ['europe', 'asia'], mult: 1.20, durationQuarters: 999 },
-      { kind: 'demand', scope: 'country:RU', mult: 0.40, durationQuarters: 12 },
     ],
   },
   {
