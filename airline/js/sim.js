@@ -161,7 +161,7 @@ export function applyChoiceOption(option, airline) {
 //      → 价格 / 声望优势的航线吃下不成比例的市场，弱者越弱
 const ELASTICITY_EXP = 1.8;
 const MATTHEW_EXP    = 1.6;
-const MAINT_FACTOR   = 0.65;  // 全局机队维护费打折，使航线盈利更易实现
+const MAINT_FACTOR   = 1.00;  // 全局机队维护费倍率（< 1 是折扣；竞争更激烈时调高）
 
 export function simulateQuarterOperations() {
   // Pass 1: 算每条有运力航线的运力 / 价格力 / 吸引力，聚合到 pair
@@ -216,11 +216,11 @@ export function simulateQuarterOperations() {
       const revenue = passengers * x.r.fare;
       const acModel = airlineAcModelForRoute(x.al, x.r);
       const fuelDistMult = fuelDistanceMultFor(x.from, x.to);
-      const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.45;
+      const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.60;
       const flights = FLIGHTS_PER_QUARTER;
       const landingFeeMult = acModel.landingFeeMult || 1.0;
-      const landingCostM = flights * (5 + (x.from.size + x.to.size)) * landingFeeMult / 2500;
-      const serviceCostM = passengers * 12 / 1e6;
+      const landingCostM = flights * (5 + (x.from.size + x.to.size)) * landingFeeMult / 1000;
+      const serviceCostM = passengers * 22 / 1e6;
       let safetyCostM = 0;
       for (const e of state.activeEffects) {
         if (e.kind === 'cost' && matchesCostScope(e.scope, x.from, x.to)) {
@@ -444,7 +444,7 @@ export function sellAircraft(airline, uid) {
   const ac = airline.aircraft[idx];
   const m = AIRCRAFT_BY_ID[ac.modelId];
   const yrs = ac.ageQuarters / 4;
-  const resale = Math.max(m.purchasePrice * 0.25, m.purchasePrice * Math.pow(0.95, yrs) * 0.7);
+  const resale = Math.max(m.purchasePrice * 0.15, m.purchasePrice * Math.pow(0.95, yrs) * 0.5);
   airline.cash += resale;
   // 释放航线的飞机绑定
   if (ac.routeId) {
@@ -551,7 +551,7 @@ export function setFare(airline, routeId, fare) {
 export function computeBreakEvenFare(airline, route) {
   const a = CITY_BY_ID[route.fromCity], b = CITY_BY_ID[route.toCity];
   const dist = distanceKm(a, b);
-  const fuelPerSeat = dist * 0.03 * 0.6 * state.fuelPrice;
+  const fuelPerSeat = dist * 0.03 * 0.60 * state.fuelPrice;
   const opPerSeat = 25 + (a.size + b.size) * 2;
   return Math.max(20, Math.round(fuelPerSeat + opPerSeat));
 }

@@ -185,22 +185,48 @@ function pickModelForDistance(al, dist) {
   return affordable[Math.floor(affordable.length / 3)];
 }
 
-// 选最佳新航线：偏向高需求 + 低竞争，尊重已开通避免（同公司）
+// 综合分（与 ui.js renderLeaderboard 一致）
+function compositeScore(al) {
+  return al.cash + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5;
+}
+
+// 选最佳新航线：偏向高需求 + 主动追打领头羊 + 避开仅由弱者占据的航线
 function bestNewRoute(al, maxRange, profile) {
   const rights = al.landingRights;
   const ownPairs = new Set(al.routes.map(r => pairKey(r.fromCity, r.toCity)));
+
+  // 找出当前积分最高的对手（领头羊）。自己 / 破产 排除。
+  let leader = null, leaderScore = -Infinity;
+  for (const x of state.airlines) {
+    if (x.id === al.id || x.bankrupt) continue;
+    const s = compositeScore(x);
+    if (s > leaderScore) { leader = x; leaderScore = s; }
+  }
+  const leaderPairs = new Set(leader ? leader.routes.map(r => pairKey(r.fromCity, r.toCity)) : []);
+
   let best = null;
   for (let i = 0; i < rights.length; i++) {
     for (let j = i + 1; j < rights.length; j++) {
       const idA = rights[i], idB = rights[j];
-      if (ownPairs.has(pairKey(idA, idB))) continue;  // 同公司同城市对避免
+      const pk = pairKey(idA, idB);
+      if (ownPairs.has(pk)) continue;
       const a = CITY_BY_ID[idA], b = CITY_BY_ID[idB];
       const dist = distanceKm(a, b);
       if (dist < 400 || dist > maxRange) continue;
       const competitors = countAirlinesOnPair(idA, idB);
-      if (competitors >= profile.maxCompetitors + 1) continue;  // 过于拥挤直接跳过
+
+      const leaderOnPair = leaderPairs.has(pk);
+      // 追领头时放宽竞争上限 (+2)，否则按 profile.maxCompetitors+1
+      const maxComp = profile.maxCompetitors + 1 + (leaderOnPair ? 2 : 0);
+      if (competitors >= maxComp) continue;
+
       const hotness = a.baseDemand * a.size + b.baseDemand * b.size;
-      const score = hotness - 250 * competitors;
+      let score = hotness - 250 * competitors;
+      // 反领头羊：领头在此航线 → 大幅加分（积极围攻）
+      if (leaderOnPair) score += 1500;
+      // 避弱：有竞争但领头不在 → 主要是弱者在飞，避开
+      else if (competitors > 0) score -= 400;
+
       if (!best || score > best.score) best = { from: idA, to: idB, dist, score, competitors };
     }
   }
