@@ -216,7 +216,8 @@ export function simulateQuarterOperations() {
       const fuelDistMult = fuelDistanceMultFor(x.from, x.to);
       const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.6;
       const flights = FLIGHTS_PER_QUARTER;
-      const landingCostM = flights * (5 + (x.from.size + x.to.size)) / 1000;
+      const landingFeeMult = acModel.landingFeeMult || 1.0;
+      const landingCostM = flights * (5 + (x.from.size + x.to.size)) * landingFeeMult / 1000;
       const serviceCostM = passengers * 22 / 1e6;
       let safetyCostM = 0;
       for (const e of state.activeEffects) {
