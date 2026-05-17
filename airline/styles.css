@@ -79,6 +79,27 @@ input, select { font-size: 14px; }
 .airline-card .hub { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .airline-card .stats { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink); }
 
+/* ===== 航司品牌徽标 (IATA 二字码 + 品牌色 chip) =====
+   不使用真实航空公司商标，以 IATA 代码做单色 chip 区分。
+*/
+.airline-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 22px; border-radius: 5px;
+  font-weight: 700; font-size: 11px; color: #fff;
+  letter-spacing: 0.6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  margin-right: 5px; flex-shrink: 0;
+  vertical-align: middle;
+}
+.airline-chip.large {
+  width: 36px; height: 30px; font-size: 14px; border-radius: 6px;
+}
+.airline-chip.CA { background: #dc2626; }    /* 国航红 */
+.airline-chip.DL { background: #1d4ed8; }    /* 达美蓝 */
+.airline-chip.LH { background: #eab308; color: #1f2937; }  /* 汉莎黄 (深字) */
+.airline-chip.SQ { background: #16a34a; }    /* 新航绿 */
+.airline-chip.XJ { background: #7c3aed; }    /* 星途紫 */
+
 /* ===== Hub picker (challenger-mode 基地挑选) ===== */
 /* 让 hub-picker 摆脱 #start-screen 的 flex centering，占用整页宽度 */
 #start-screen.picker-mode {

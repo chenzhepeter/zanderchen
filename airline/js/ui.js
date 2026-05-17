@@ -391,19 +391,52 @@ function showGameView() {
 
 function showTutorialModal() {
   const player = getPlayer();
-  openModal({
-    title: '欢迎来到航空霸业 Lite',
+  const hubCity = CITY_BY_ID[state.playerHub];
+  // 第一页：开局定位
+  const page1 = () => openModal({
+    title: '✈️ 欢迎来到星途航空',
     body: `
-      <p>你是 <b>${player.nameZh}</b> 的新任 CEO。本游戏共 <b>100 季度（2000 Q1 → 2025 Q4）</b>。</p>
-      <ol style="padding-left:1.2em; line-height:1.7">
-        <li>每条航线只挂 <b>一架飞机</b>，要更多运力就开多条航线（同城市对可重复）。</li>
-        <li>票价用滑块调整：红 → 黄（盈亏平衡） → 绿（高利润）。默认 50% 毛利。</li>
-        <li>载荷率受 价格、声望、和 <b>竞争</b> 影响 — 同城市对多家航司在飞时，每家都会显著掉载荷。</li>
-        <li>左上 ⚙️ 菜单可保存/读取（5 槽位）或回到首页。</li>
-      </ol>
+      <p>你是 <b>${airlineChip(player, { large: true })} ${player.nameZh}</b> 的创始 CEO，基地设在 <b>${hubCity ? hubCity.nameZh : '未知'} (${state.playerHub})</b>。</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0">
+        <div style="background:#f3e8ff;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:20px;font-weight:700;color:#7c3aed">$300M</div>
+          <div style="font-size:12px;color:var(--muted)">初始资金</div>
+        </div>
+        <div style="background:#f3e8ff;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:20px;font-weight:700;color:#7c3aed">1 架</div>
+          <div style="font-size:12px;color:var(--muted)">ERJ-145 支线</div>
+        </div>
+        <div style="background:#f3e8ff;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:20px;font-weight:700;color:#7c3aed">25 年</div>
+          <div style="font-size:12px;color:var(--muted)">2000 → 2025</div>
+        </div>
+      </div>
+      <p>你的对手是 4 家成熟巨头：${airlineChip({ codeIATA: 'CA' })}国航 · ${airlineChip({ codeIATA: 'DL' })}达美 · ${airlineChip({ codeIATA: 'LH' })}汉莎 · ${airlineChip({ codeIATA: 'SQ' })}新航。它们各自有 6–8 架飞机和 5 条已开通航线。</p>
+      <p style="color:var(--muted);font-size:14px;line-height:1.7">你的优势不是规模——是<b>灵活</b>。下一页教你 5 个以小搏大的杠杆。</p>
     `,
-    actions: [{ label: '开始游戏', primary: true, onClick: closeModal }],
+    actions: [{ label: '下一页 →', primary: true, onClick: page2 }],
   });
+  // 第二页：5 个战略杠杆
+  const page2 = () => openModal({
+    title: '🎯 5 个以小搏大的杠杆',
+    body: `
+      <ol style="padding-left:1.2em;line-height:1.7;font-size:14px">
+        <li>🌍 <b>区域独占</b> — 你选了一个无巨头的区域，别离开你的舒适区，先把周边航线占满</li>
+        <li>🌱 <b>升星红利</b> — 城市会随年份升星 (例如孟买 2020 升 5★)。在升星前抢着陆权，长大后躺收</li>
+        <li>💰 <b>低 CAPEX 优先</b> — 用 ERJ-145/E-190 这种 $20–38M 支线机先回血，A320 等几年再说</li>
+        <li>🎯 <b>缝隙航线</b> — 别在 PEK-LHR 这种主干道挑战巨头。找它们不飞的城市对 (例如 GRU-JNB)</li>
+        <li>⚠️ <b>危机套利</b> — SARS 砸亚洲、9/11 砸美国、新冠砸全部。巨头流血时是你抢市场的窗口</li>
+      </ol>
+      <p style="background:#fff7ed;border-left:3px solid var(--warn);padding:10px;border-radius:8px;font-size:13px;margin-top:14px">
+        💡 第一步建议：去 <b>城市</b> 标签申请 2 个邻近城市的着陆权（5 星 4 季 / 4 星 3 季 / 3 星 2 季），同时再买一架支线机。
+      </p>
+    `,
+    actions: [
+      { label: '← 上一页', onClick: page1 },
+      { label: '开始经营', primary: true, onClick: closeModal },
+    ],
+  });
+  page1();
 }
 
 // ===== Render =====
@@ -682,7 +715,7 @@ function showRoutePairDetail(fromCityId, toCityId) {
         const profitTxt = x.r.lastProfit ? `$${fmt(x.r.lastProfit)}M` : '—';
         const loadTxt = x.r.lastLoadFactor ? Math.round(x.r.lastLoadFactor * 100) + '%' : '—';
         return `<tr ${x.al.isPlayer ? 'class="me"' : ''}>
-          <td><span class="dot" style="background:${x.al.color}"></span> ${x.al.nameShort}${x.al.isPlayer ? '（你）' : ''}</td>
+          <td>${airlineChip(x.al)} ${x.al.nameShort}${x.al.isPlayer ? '（你）' : ''}</td>
           <td>${x.acModel ? x.acModel.name : '<span class="muted">无飞机</span>'}</td>
           <td>$${x.r.fare}</td>
           <td>${loadTxt}</td>
@@ -1027,7 +1060,7 @@ function showCityRoutes(cityId) {
           <thead><tr><th>航司</th><th>目的地</th><th>距离</th><th>机型</th><th>载荷</th></tr></thead>
           <tbody>${rows.map(x => `
             <tr ${x.al.isPlayer ? 'class="me"' : ''}>
-              <td><span class="dot" style="background:${x.al.color}"></span> ${x.al.nameShort}${x.al.isPlayer ? '（你）' : ''}</td>
+              <td>${airlineChip(x.al)} ${x.al.nameShort}${x.al.isPlayer ? '（你）' : ''}</td>
               <td>${x.other.nameZh} (${x.other.iata})</td>
               <td>${x.dist}km</td>
               <td>${x.acModel || '<span class="muted">无</span>'}</td>
@@ -1074,13 +1107,13 @@ function renderLeaderboard() {
   scored.sort((a, b) => b.score - a.score);
   return `
     <div class="panel">
-      <h3>4 家航司排行</h3>
+      <h3>航司排行 (${scored.length})</h3>
       <table class="game-table">
         <thead><tr><th>#</th><th>航司</th><th>现金</th><th>机队</th><th>航线</th><th>声望</th><th>综合分</th></tr></thead>
         <tbody>${scored.map((s, i) => `
           <tr class="${s.al.isPlayer ? 'me' : ''}">
             <td>${i + 1}</td>
-            <td><span class="dot" style="background:${s.al.color}"></span> ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
+            <td>${airlineChip(s.al)} ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
             <td>$${fmt(s.al.cash)}M</td>
             <td>${s.al.aircraft.length}</td>
             <td>${s.al.routes.length}</td>
@@ -1128,7 +1161,7 @@ function renderIntel() {
     <div class="competitor-tabs">
       ${competitors.map(al => `
         <button class="comp-tab ${al.id === intelSelectedCompetitor ? 'active' : ''}" data-aid="${al.id}">
-          <span class="dot" style="background:${al.color}"></span>
+          ${airlineChip(al)}
           <span>${al.nameZh}</span>
         </button>
       `).join('')}
@@ -1456,7 +1489,7 @@ function showEndGame() {
         <tbody>${scored.map((s, i) => `
           <tr class="${s.al.isPlayer ? 'me' : ''}">
             <td>${i + 1}</td>
-            <td><span class="dot" style="background:${s.al.color}"></span> ${s.al.nameZh}</td>
+            <td>${airlineChip(s.al)} ${s.al.nameZh}</td>
             <td><b>${Math.round(s.score)}</b></td>
             <td>$${fmt(s.al.cash)}M</td>
             <td>${s.al.aircraft.length}</td>
@@ -1552,6 +1585,14 @@ function fmt(n) {
   if (Math.abs(n) >= 1) return n.toFixed(1);
   return n.toFixed(2);
 }
+// 航司品牌徽标：IATA 二字码 + 品牌色背景 (不使用真实商标)
+function airlineChip(airline, opts = {}) {
+  if (!airline) return '';
+  const code = airline.codeIATA || 'XX';
+  const cls = opts.large ? 'airline-chip large' : 'airline-chip';
+  return `<span class="${cls} ${code}">${code}</span>`;
+}
+
 function flagOf(country) {
   const map = {
     CN: '🇨🇳', US: '🇺🇸', DE: '🇩🇪', SG: '🇸🇬', JP: '🇯🇵', HK: '🇭🇰', KR: '🇰🇷',
