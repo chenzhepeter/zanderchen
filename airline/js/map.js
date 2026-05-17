@@ -220,13 +220,42 @@ export function drawMapContents(el, opts = {}) {
 
   // 城市点
   const playerRights = (state.airlines.find(a => a.isPlayer)?.landingRights) || [];
+  const incumbentHubs = new Set(opts.incumbentHubs || []);   // 金色光环（4 巨头基地）
+  const candidateHubs = new Set(opts.highlightHubs || []);   // 紫色虚线圈（可选基地）
+  const selectedHub = opts.selectedHub || null;              // 已选中的候选（实心紫圈）
   for (const c of CITIES) {
     const p = project(c.lng, c.lat);
     const g = svgEl('g', { class: 'map-city', 'data-id': c.id });
     g.style.cursor = 'pointer';
+    const baseR = 3 + c.size * 0.5;
+
+    // 4 巨头基地：金色光环（外圈）
+    if (incumbentHubs.has(c.id)) {
+      g.appendChild(svgEl('circle', {
+        cx: p.x, cy: p.y, r: baseR + 5,
+        fill: 'none', stroke: '#f59e0b', 'stroke-width': 2.5,
+        'stroke-opacity': 0.8,
+      }));
+    }
+    // 候选基地：紫色虚线圈
+    if (candidateHubs.has(c.id)) {
+      const isSel = c.id === selectedHub;
+      g.appendChild(svgEl('circle', {
+        cx: p.x, cy: p.y, r: baseR + 5,
+        fill: 'none',
+        stroke: '#7c3aed',
+        'stroke-width': isSel ? 3 : 2,
+        'stroke-dasharray': isSel ? 'none' : '3 3',
+        'stroke-opacity': isSel ? 1 : 0.85,
+      }));
+    }
+
     g.appendChild(svgEl('circle', {
-      cx: p.x, cy: p.y, r: 3 + c.size * 0.5,
-      fill: playerRights.includes(c.id) ? '#2563eb' : '#475569',
+      cx: p.x, cy: p.y, r: baseR,
+      fill: playerRights.includes(c.id) ? '#2563eb'
+        : incumbentHubs.has(c.id) ? '#f59e0b'
+        : candidateHubs.has(c.id) ? '#7c3aed'
+        : '#475569',
       stroke: '#ffffff', 'stroke-width': 1.5,
     }));
     const txt = svgEl('text', {

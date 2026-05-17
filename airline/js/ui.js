@@ -131,6 +131,7 @@ function showStartMenu() {
   $('#start-screen').hidden = false;
   $('#game-screen').hidden = true;
   const root = $('#start-screen');
+  root.classList.remove('picker-mode');
   root.innerHTML = `
     <div class="start-card centered">
       <h1 class="game-title">✈️ 航空霸业 Lite</h1>
@@ -143,43 +144,159 @@ function showStartMenu() {
       <div class="version-tag">v${APP_VERSION}</div>
     </div>
   `;
-  $('#new-game-btn').addEventListener('click', showAirlinePicker);
+  $('#new-game-btn').addEventListener('click', showHubPicker);
   $('#load-game-btn').addEventListener('click', showLoadSlotsScreen);
 }
 
-function showAirlinePicker() {
+// 计算城市的战略标签：升星机会 / 区域独占 / 与巨头同区
+function strategicTags(city) {
+  const aiHubsByRegion = new Map();
+  for (const a of AIRLINES) {
+    const hub = CITY_BY_ID[a.hubCity];
+    if (hub) aiHubsByRegion.set(hub.region, a);
+  }
+  const tags = [];
+  if (city.sizeHistory && city.sizeHistory.length > 0) {
+    const upgrade = city.sizeHistory[city.sizeHistory.length - 1];
+    tags.push({ icon: '🌱', text: `${upgrade.year} 升 ${'★'.repeat(upgrade.size)}`, tone: 'good' });
+  }
+  if (!aiHubsByRegion.has(city.region)) {
+    tags.push({ icon: '🌍', text: '区域无巨头', tone: 'good' });
+  } else {
+    const ai = aiHubsByRegion.get(city.region);
+    tags.push({ icon: '⛔', text: `同区 ${ai.nameShort}`, tone: 'warn' });
+  }
+  return tags;
+}
+
+// 列出 ERJ145 (2800km) 范围内可达城市数
+function reachableCount(city, maxKm = 2800) {
+  let n = 0;
+  for (const c of CITIES) {
+    if (c.id === city.id) continue;
+    if (distanceKm(city, c) <= maxKm) n++;
+  }
+  return n;
+}
+
+// 候选基地：3 / 4 星城市，排除 4 巨头基地
+function candidateHubCities() {
+  const aiHubs = new Set(AIRLINES.map(a => a.hubCity));
+  return CITIES.filter(c => (c.baseSizeAt2000 === 3 || c.baseSizeAt2000 === 4) && !aiHubs.has(c.id));
+}
+
+let _hubPickerSelection = null;  // 当前选中的候选 cityId
+
+function showHubPicker() {
+  // 用第一个候选当 dummy hub 初始化预览状态，让地图能渲染 4 AI 航线
+  const candidates = candidateHubCities();
+  const dummyHub = candidates[0].id;
+  initNewGame(dummyHub);
+  _hubPickerSelection = null;
+
+  const aiHubs = AIRLINES.map(a => a.hubCity);
+  const candidateIds = candidates.map(c => c.id);
+
   const root = $('#start-screen');
+  root.classList.add('picker-mode');
   root.innerHTML = `
-    <div class="start-card centered">
-      <h1 class="game-title">✈️ 选择航司</h1>
-      <p class="hint">点选一家航司开始 2000 Q1。</p>
-      <div class="airline-pick">
-        ${AIRLINES.map(a => `
-          <button class="airline-card" data-id="${a.id}" style="--c:${a.color}">
-            <div class="flag">${flagOf(a.country)}</div>
-            <div class="name">${a.nameZh}</div>
-            <div class="hub">主基地 ${CITY_BY_ID[a.hubCity].nameZh} (${a.hubCity})</div>
-            <div class="stats">
-              <span>💰 $${a.initialCash}M</span>
-              <span>✈️ ${a.initialFleet.reduce((s, f) => s + f.count, 0)} 架</span>
-              <span>⭐ 声望 ${a.initialPrestige}</span>
-            </div>
-          </button>
-        `).join('')}
+    <div class="hub-picker">
+      <div class="hub-picker-head">
+        <h1>欢迎来到 <span style="color:#7c3aed">星途航空</span></h1>
+        <p class="hint">你是新进入者，要在 25 年内挑战 4 家成熟巨头 (国航 / 达美 / 汉莎 / 新航)。<br>
+          <b>初始资金 $300M、1 架 ERJ-145、1 个基地</b>。选一个 3★ 或 4★ 城市开始。</p>
       </div>
-      <button class="ghost-btn" id="back-to-menu">← 返回</button>
+      <div class="hub-picker-body">
+        <div class="hub-picker-map">
+          <svg id="hub-map" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div class="map-legend">
+            <span><span class="lg lg-gold"></span>巨头基地 (PEK / JFK / FRA / SIN)</span>
+            <span><span class="lg lg-cand"></span>可选基地 (10 个)</span>
+            <span><span class="lg lg-route"></span>巨头航线 (20 条)</span>
+          </div>
+        </div>
+        <div class="hub-picker-side">
+          <div class="hub-list" id="hub-list">
+            ${candidates.map(c => hubCardHtml(c)).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="hub-picker-footer">
+        <button class="ghost-btn" id="hub-back">← 返回</button>
+        <div id="hub-confirm-wrap"></div>
+      </div>
     </div>
   `;
-  $$('.airline-card', root).forEach(b => {
-    b.addEventListener('click', () => {
-      initNewGame(b.dataset.id);
-      seedInitialQuarterReport();
-      saveGame();
-      showGameView();
-      showTutorialModal();
+
+  // 构建地图 SVG
+  const mapEl = $('#hub-map');
+  buildMapSvg(mapEl);
+  // 异步加载真实陆地（与 main.js 入口一致）
+  import('./map.js').then(m => m.loadDetailedLand().then(ok => { if (ok) m.drawLand(mapEl); }));
+  redrawHubMap();
+
+  function redrawHubMap() {
+    drawMapContents(mapEl, {
+      incumbentHubs: aiHubs,
+      highlightHubs: candidateIds,
+      selectedHub: _hubPickerSelection,
+      onCityClick: c => {
+        if (candidateIds.includes(c.id)) selectHub(c.id);
+      },
     });
+  }
+
+  function selectHub(cityId) {
+    _hubPickerSelection = cityId;
+    redrawHubMap();
+    // 高亮列表
+    $$('#hub-list .hub-card').forEach(el => {
+      el.classList.toggle('selected', el.dataset.id === cityId);
+    });
+    // 滚动到对应卡片
+    const card = $(`#hub-list .hub-card[data-id="${cityId}"]`);
+    if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // 渲染确认按钮
+    const c = CITY_BY_ID[cityId];
+    $('#hub-confirm-wrap').innerHTML = `
+      <span class="muted">已选 <b style="color:#7c3aed">${c.nameZh} (${c.iata})</b> 作为基地</span>
+      <button class="primary-btn" id="hub-confirm">✈️ 确认开局</button>
+    `;
+    $('#hub-confirm').addEventListener('click', () => confirmHub(cityId));
+  }
+
+  function confirmHub(cityId) {
+    // 用真实选中城市重新初始化
+    initNewGame(cityId);
+    seedInitialQuarterReport();
+    saveGame();
+    showGameView();
+    showTutorialModal();
+  }
+
+  // 列表卡片点击
+  $$('#hub-list .hub-card').forEach(el => {
+    el.addEventListener('click', () => selectHub(el.dataset.id));
   });
-  $('#back-to-menu').addEventListener('click', showStartMenu);
+
+  $('#hub-back').addEventListener('click', showStartMenu);
+}
+
+function hubCardHtml(c) {
+  const tags = strategicTags(c);
+  const tagsHtml = tags.map(t => `<span class="tag tag-${t.tone}">${t.icon} ${t.text}</span>`).join('');
+  const reach = reachableCount(c, 2800);
+  const sub = `${regionLabel(c.region)} · ${'★'.repeat(c.baseSizeAt2000)} · ERJ-145 可达 ${reach} 城`;
+  return `
+    <div class="hub-card" data-id="${c.id}">
+      <div class="hub-card-head">
+        <span class="hub-name">${c.nameZh}</span>
+        <span class="hub-iata">${c.iata}</span>
+      </div>
+      <div class="hub-sub">${sub}</div>
+      <div class="hub-tags">${tagsHtml}</div>
+    </div>
+  `;
 }
 
 function showLoadSlotsScreen() {
@@ -263,6 +380,7 @@ function attachSlotHandlers(root, mode) {
 }
 
 function showGameView() {
+  $('#start-screen').classList.remove('picker-mode');
   $('#start-screen').hidden = true;
   $('#game-screen').hidden = false;
   buildMapSvg($('#world-map'));
@@ -1252,7 +1370,7 @@ function showBankruptcyModal() {
     `,
     actions: [
       { label: '回到首页', onClick: () => { clearSave(); closeModal(); showStartMenu(); } },
-      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showAirlinePicker(); } },
+      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showHubPicker(); } },
     ],
   });
 }
@@ -1348,7 +1466,7 @@ function showEndGame() {
     `,
     actions: [
       { label: '回到首页', onClick: () => { clearSave(); closeModal(); showStartMenu(); } },
-      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showAirlinePicker(); } },
+      { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showHubPicker(); } },
     ],
   });
 }
