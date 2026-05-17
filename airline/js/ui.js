@@ -1,6 +1,7 @@
 import {
-  state, getPlayer, saveGame, loadGame, clearSave, initNewGame,
+  state, getPlayer, saveGame, loadGame, hasSave, clearSave, initNewGame,
   saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, NUM_SLOTS, APP_VERSION, SAVE_VERSION,
+  DIFFICULTY,
   logPlayerAction, clearTurnActions, routeIsModified,
 } from './state.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
@@ -15,6 +16,7 @@ import {
   cityRouteSlots, routesAtCity,
   fleetMaintDiscountInfo, describeEvent,
   quarterSeatCapacity,
+  peekUpcomingEvents,
 } from './sim.js';
 import { runAiTurn, runAiChoicesForEvent } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
@@ -27,6 +29,66 @@ let currentTab = 'routes';
 let cityTabSort = { col: 'region', dir: 'asc' };
 let routeTabSort = { col: 'pair', dir: 'asc' };  // pair / dist / profit / load / fare
 let intelSelectedCompetitor = null;  // 选中的对手 airline id
+
+// === 术语词典（点 (?) 时弹出解释，引用 sim.js 真实常量） ===
+const GLOSSARY = {
+  'breakeven': {
+    title: '盈亏平衡价 (Break-even Fare)',
+    body: '<p>每位乘客的票价至少要覆盖该航段的成本，才不亏损。</p><p><b>公式：</b><br>盈亏价 ≈ 距离 × 0.018 × 油价系数 + 25 + (起点星级 + 终点星级) × 2</p><p>第一项是每座油费 (0.03 升 × 60%平均载客 × 距离 × 当前油价)，第二项是固定服务+起降费。距离越长、油价越高、城市越大，盈亏价越高。</p><p><b>系统默认推荐 = 盈亏价 × 2.0（50% 毛利）</b>。</p>',
+  },
+  'loadFactor': {
+    title: '载荷率 (Load Factor)',
+    body: '<p>本季实际载客 ÷ 总运力。例如总座位 10000，载了 7500 人，载荷 75%。</p><p>载荷 &gt; 90% 通常意味着供不应求，可以涨价或加运力；载荷 &lt; 40% 意味着竞争太激烈或票价虚高。</p>',
+  },
+  'prestige': {
+    title: '声望 (Prestige)',
+    body: '<p>抽象的"品牌强度"，初始 50–70。声望越高，同条件下航线吸引力越强（公式里 prestigeBoost = 1 + (prestige - 50) × 0.0018）。</p><p>声望来自：事件选择 (9/11 投入安保 +5)、玩家行动（人道援助）、永久 prestigePerQuarter buff。空难类事件会减声望。</p>',
+  },
+  'marketShare': {
+    title: '市场份额 (Market Share)',
+    body: '<p>在同一城市对（如 PEK-LHR）上，多家航司共享一个固定大小的市场。每家拿走的份额 = 自家吸引力 ÷ 全部吸引力之和。</p><p>吸引力 = (运力 × 价格力 × 声望系数)<sup>1.6</sup>，详见"马太效应"。</p>',
+  },
+  'elasticity': {
+    title: '价格弹性 (Price Elasticity, 指数 1.8)',
+    body: '<p>价格力 = (基准票价 ÷ 当前票价)<sup>1.8</sup>。指数为 1.8 时，涨价 10% 价格力 ≈ ×0.84（损失约 16% 吸引力）；降价 10% 价格力 ≈ ×1.20（多 20% 吸引力）。</p><p><b>含义：高价对需求是指数级抑制，低价是指数级放大。</b></p>',
+  },
+  'matthew': {
+    title: '马太效应 (Network Effects, 指数 1.6)',
+    body: '<p>最终吸引力 = (运力 × 价格力 × 声望)<sup>1.6</sup>。指数 &gt; 1 意味着小优势被放大。</p><p>例：两家航司原始吸引力 100 vs 120。开根方放大后：100^1.6=1585，120^1.6=1990。份额从 45.5/54.5 变成 44.3/55.7 — 强者吃更多。</p>',
+  },
+  'distance': {
+    title: '距离系数 (Distance Factor)',
+    body: '<p>市场容量按距离分段缩放：&lt; 500km × 0.5（短途铁路替代）；500–1500km × 1.0；1500–5000km × 1.10（黄金距离）；5000–10000km × 0.95；&gt;10000km × 0.85（超远长程）。</p><p>含义：1500–5000km 的"中长航线"市场最大，性价比最高。</p>',
+  },
+  'season': {
+    title: '季节性 (Seasonality)',
+    body: '<p>Q2、Q3 (夏季旅游旺季)：×1.10；Q1、Q4 (淡季)：×0.92。所有航线统一应用。</p>',
+  },
+  'fuelMult': {
+    title: '油价倍率',
+    body: '<p>初始 1.00×。受事件影响：伊战 (+30%, 8季)、2008 油价峰 (+50%, 3季)、2014 油价崩 (×0.5, 8季)、俄乌冲突 (+40%, 6季)、SAF 强制令 (+8%, 永久)。多倍率叠乘。</p><p>每架飞机的油耗 fuelPerSeatKm 是固定的；油价倍率改变的是单位油费支出。</p>',
+  },
+};
+
+function glossaryBtn(termKey) {
+  return `<button class="term-help" data-term="${termKey}" type="button" aria-label="术语解释">?</button>`;
+}
+
+function showGlossary(termKey) {
+  const g = GLOSSARY[termKey];
+  if (!g) return;
+  openModal({
+    title: `📖 ${g.title}`,
+    body: g.body,
+    actions: [{ label: '了解了', primary: true, onClick: closeModal }],
+  });
+}
+
+// 全局事件代理：任何 .term-help 点击都触发 glossary
+document.addEventListener('click', e => {
+  const t = e.target.closest('.term-help');
+  if (t) { e.preventDefault(); showGlossary(t.dataset.term); }
+});
 
 export function bootUi() {
   buildShell();
@@ -41,6 +103,7 @@ function buildShell() {
       <header id="top-bar" class="top-bar">
         <button id="menu-btn" class="menu-btn" aria-label="菜单">⚙️</button>
         <button id="end-turn-btn" class="primary-btn end-turn-top">结束季度 →</button>
+        <button id="ff-btn" class="ghost-btn end-turn-top" title="若未来 2 季无事件、玩家本季未操作，则连续推进" hidden>⏩ 快进</button>
         <div id="hud" class="hud"></div>
       </header>
       <section id="map-wrap" class="map-wrap">
@@ -63,7 +126,42 @@ function buildShell() {
   `;
   $('#end-turn-btn').addEventListener('click', onEndTurnConfirm);
   $('#menu-btn').addEventListener('click', openMenu);
+  $('#ff-btn').addEventListener('click', onFastForward);
   $$('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
+}
+
+// 快进按钮显隐 + 推进条件：未来 2 季无事件 + 上季玩家无操作 + 现金 > 5× 维护
+function refreshFastForwardBtn() {
+  const btn = $('#ff-btn');
+  if (!btn) return;
+  const p = getPlayer();
+  if (!p || state.gameOver) { btn.hidden = true; return; }
+  const upcoming = peekUpcomingEvents(state.year, state.quarter, 2);
+  const noActions = (state.thisTurnActions || []).length === 0;
+  const totalMaint = p.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].maintenancePerQuarter, 0);
+  const cashSafe = p.cash > 5 * Math.max(1, totalMaint);
+  btn.hidden = !(upcoming.length === 0 && noActions && cashSafe);
+}
+
+function onFastForward() {
+  // 最多连续推进 2 季，每次都重新评估条件
+  let count = 0;
+  while (count < 2) {
+    const upcoming = peekUpcomingEvents(state.year, state.quarter, 1);
+    if (upcoming.length > 0) break;
+    const p = getPlayer();
+    if (!p) break;
+    const totalMaint = p.aircraft.reduce((s, a) => s + AIRCRAFT_BY_ID[a.modelId].maintenancePerQuarter, 0);
+    if (p.cash <= 5 * Math.max(1, totalMaint)) break;
+    clearTurnActions();
+    const triggered = advanceQuarter(runAiTurn, runAiChoicesForEvent);
+    count++;
+    if (triggered.length > 0 || state.gameOver) break;
+    if (p.cash < 0) break;
+  }
+  saveGame();
+  rerender();
+  if (count > 0) toast(`已快进 ${count} 季`);
 }
 
 // ===== Start menu (centered, traditional layout) =====
@@ -77,22 +175,46 @@ function showStartMenu() {
       <p class="subtitle">2000 → 2025 · 25 年航线经营沙盘</p>
       <p class="hint">亲历 21 世纪初的航空业大事件：9/11、SARS、金融危机、火山灰、新冠、俄乌冲突⋯</p>
       <div class="menu-buttons">
-        <button class="primary-btn big" id="new-game-btn">🎮 开始新游戏</button>
+        ${hasSave() ? '<button class="primary-btn big" id="continue-btn">▶️ 继续上局</button>' : ''}
+        <button class="${hasSave() ? 'ghost-btn' : 'primary-btn'} big" id="new-game-btn">🎮 开始新游戏</button>
         <button class="ghost-btn big" id="load-game-btn">📂 读取存档</button>
       </div>
       <div class="version-tag">v${APP_VERSION}</div>
     </div>
   `;
+  const contBtn = $('#continue-btn');
+  if (contBtn) {
+    contBtn.addEventListener('click', () => {
+      const res = loadGame();
+      if (res && res.ok) { showGameView(); toast('已恢复上局'); }
+      else if (res && res.reason === 'version') {
+        toast(`存档版本不兼容（v${res.oldVersion}，当前 v${SAVE_VERSION}），请新开一局`);
+      } else {
+        toast('恢复失败：自动存档已损坏');
+      }
+    });
+  }
   $('#new-game-btn').addEventListener('click', showAirlinePicker);
   $('#load-game-btn').addEventListener('click', showLoadSlotsScreen);
 }
+
+let selectedDifficulty = 'normal';
 
 function showAirlinePicker() {
   const root = $('#start-screen');
   root.innerHTML = `
     <div class="start-card centered">
       <h1 class="game-title">✈️ 选择航司</h1>
-      <p class="hint">点选一家航司开始 2000 Q1。</p>
+      <p class="hint">先选难度，再点选一家航司开始 2000 Q1。</p>
+      <div class="difficulty-pick">
+        <span class="muted small">难度：</span>
+        ${Object.entries(DIFFICULTY).map(([key, cfg]) => `
+          <button class="diff-btn ${key === selectedDifficulty ? 'active' : ''}" data-diff="${key}" title="初始现金 ×${cfg.cashMult}, AI 上限 ${cfg.maxAiActions}/季">
+            ${cfg.label}
+          </button>
+        `).join('')}
+      </div>
+      <div class="diff-summary muted small" id="diff-summary"></div>
       <div class="airline-pick">
         ${AIRLINES.map(a => `
           <button class="airline-card" data-id="${a.id}" style="--c:${a.color}">
@@ -100,7 +222,7 @@ function showAirlinePicker() {
             <div class="name">${a.nameZh}</div>
             <div class="hub">主基地 ${CITY_BY_ID[a.hubCity].nameZh} (${a.hubCity})</div>
             <div class="stats">
-              <span>💰 $${a.initialCash}M</span>
+              <span class="cash-stat" data-base="${a.initialCash}">💰 $${a.initialCash}M</span>
               <span>✈️ ${a.initialFleet.reduce((s, f) => s + f.count, 0)} 架</span>
               <span>⭐ 声望 ${a.initialPrestige}</span>
             </div>
@@ -110,9 +232,26 @@ function showAirlinePicker() {
       <button class="ghost-btn" id="back-to-menu">← 返回</button>
     </div>
   `;
+  const refreshDiffUi = () => {
+    $$('.diff-btn', root).forEach(b => b.classList.toggle('active', b.dataset.diff === selectedDifficulty));
+    const cfg = DIFFICULTY[selectedDifficulty];
+    $('#diff-summary').textContent = `初始现金 ×${cfg.cashMult} · 事件强度向 1.0 ${cfg.eventConverge >= 0 ? '收敛' : '放大'} ${Math.abs(Math.round(cfg.eventConverge * 100))}% · AI 每季最多 ${cfg.maxAiActions} 项动作 · AI 性格 ${cfg.aiDowngrade > 0 ? '降一档' : cfg.aiDowngrade < 0 ? '升一档' : '不变'}`;
+    // 更新航司卡片的现金显示
+    $$('.cash-stat', root).forEach(s => {
+      const base = parseInt(s.dataset.base, 10);
+      s.textContent = `💰 $${Math.round(base * cfg.cashMult)}M`;
+    });
+  };
+  refreshDiffUi();
+  $$('.diff-btn', root).forEach(b => {
+    b.addEventListener('click', () => {
+      selectedDifficulty = b.dataset.diff;
+      refreshDiffUi();
+    });
+  });
   $$('.airline-card', root).forEach(b => {
     b.addEventListener('click', () => {
-      initNewGame(b.dataset.id);
+      initNewGame(b.dataset.id, selectedDifficulty);
       saveGame();
       showGameView();
       showTutorialModal();
@@ -233,6 +372,7 @@ export function rerender() {
   drawMapContents($('#world-map'), { onCityClick: c => { setTab('cities'); showCityRoutes(c.id); } });
   renderTabs();
   renderTabBody();
+  refreshFastForwardBtn();
 }
 
 function renderHud() {
@@ -246,8 +386,8 @@ function renderHud() {
       <div><span class="lbl">现金</span><span class="val">$${fmt(p.cash)}M</span></div>
       <div><span class="lbl">机队</span><span class="val">${p.aircraft.length}</span></div>
       <div><span class="lbl">航线</span><span class="val">${p.routes.length}</span></div>
-      <div><span class="lbl">声望</span><span class="val">${Math.round(p.prestige)}</span></div>
-      <div><span class="lbl">油价</span><span class="val">${state.fuelPrice.toFixed(2)}×</span></div>
+      <div><span class="lbl">声望 ${glossaryBtn('prestige')}</span><span class="val">${Math.round(p.prestige)}</span></div>
+      <div><span class="lbl">油价 ${glossaryBtn('fuelMult')}</span><span class="val">${state.fuelPrice.toFixed(2)}×</span></div>
     </div>
   `;
 }
@@ -372,9 +512,9 @@ function renderRoutes() {
       <div class="table-wrap"><table class="game-table routes-table">
         <thead><tr>
           <th>城市对</th>
-          <th>票价（拖动）</th>
+          <th>票价（拖动）${glossaryBtn('breakeven')}</th>
           <th>飞机</th>
-          <th>载荷</th>
+          <th>载荷 ${glossaryBtn('loadFactor')}</th>
           <th>上季利润</th>
           <th>操作</th>
         </tr></thead>
@@ -1041,12 +1181,13 @@ function renderStrategy() {
   const comp = computeCompetition();
   const recs = computeRecommendations();
 
-  let html = `<div class="panel"><h3>🎯 航线竞争快照</h3>`;
+  let html = `<div class="panel"><h3>🎯 航线竞争快照</h3>
+    <p class="muted small">市场份额由 <b>价格弹性 ${glossaryBtn('elasticity')}</b> 与 <b>马太效应 ${glossaryBtn('matthew')}</b> 决定。点 ? 看公式。</p>`;
   if (comp.length === 0) {
     html += `<p class="muted">还没有航线。</p>`;
   } else {
     html += `<div class="table-wrap"><table class="game-table">
-      <thead><tr><th>航线</th><th>你的份额</th><th>对手</th></tr></thead><tbody>`;
+      <thead><tr><th>航线</th><th>你的份额 ${glossaryBtn('marketShare')}</th><th>对手</th></tr></thead><tbody>`;
     for (const c of comp) {
       const a = CITY_BY_ID[c.route.fromCity], b = CITY_BY_ID[c.route.toCity];
       const shareCls = c.myShare >= 0.7 ? 'pos' : c.myShare >= 0.4 ? '' : 'warn';
@@ -1064,7 +1205,13 @@ function renderStrategy() {
     html += `<p class="muted">运营平稳，暂无紧迫建议。</p>`;
   } else {
     html += `<ul class="rec-list">`;
-    for (const r of recs) html += `<li class="rec rec-${r.severity}"><span class="rec-icon">${r.icon}</span><span>${escapeHtml(r.text)}</span></li>`;
+    for (const r of recs) html += `<li class="rec rec-${r.severity}">
+      <span class="rec-icon">${r.icon}</span>
+      <div class="rec-body">
+        <div class="rec-text">${escapeHtml(r.text)}</div>
+        ${r.reason ? `<div class="rec-reason"><span class="rec-why">为什么：</span>${escapeHtml(r.reason)}</div>` : ''}
+      </div>
+    </li>`;
     html += `</ul>`;
   }
   html += `</div>`;
@@ -1280,10 +1427,15 @@ function showEndGame() {
   scored.sort((a, b) => b.score - a.score);
   const me = scored.find(s => s.al.isPlayer);
   const rank = scored.indexOf(me) + 1;
+
+  // === 计算 5 个分项奖 ===
+  const awards = computeAwards();
+  const playerWins = awards.filter(a => a.winner && a.winner.id === me.al.id);
+
   openModal({
     title: '🏆 2025 Q4 · 25 年终局',
     body: `
-      <h3 style="margin:0 0 .5em">你最终排名 第 ${rank} 名</h3>
+      <h3 style="margin:0 0 .5em">你最终排名 第 ${rank} 名 · 获得 ${playerWins.length} 个分项奖</h3>
       <table class="game-table">
         <thead><tr><th>#</th><th>航司</th><th>综合分</th><th>现金</th><th>机队</th><th>声望</th></tr></thead>
         <tbody>${scored.map((s, i) => `
@@ -1296,12 +1448,61 @@ function showEndGame() {
             <td>${Math.round(s.al.prestige)}</td>
           </tr>`).join('')}</tbody>
       </table>
+
+      <h3 style="margin:1em 0 .5em">🎖️ 分项奖</h3>
+      <div class="awards-grid">
+        ${awards.map(aw => `
+          <div class="award-card ${aw.winner && aw.winner.id === me.al.id ? 'mine' : ''}">
+            <div class="award-icon">${aw.icon}</div>
+            <div class="award-info">
+              <div class="award-name">${aw.name}</div>
+              <div class="award-winner">
+                ${aw.winner
+                  ? `<span class="dot" style="background:${aw.winner.color}"></span> <b>${aw.winner.nameShort}</b> · ${aw.statText}`
+                  : '<span class="muted">无人达成</span>'}
+              </div>
+              <div class="award-desc muted small">${aw.desc}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
     `,
     actions: [
       { label: '回到首页', onClick: () => { clearSave(); closeModal(); showStartMenu(); } },
       { label: '再玩一局', primary: true, onClick: () => { clearSave(); closeModal(); showAirlinePicker(); } },
     ],
   });
+}
+
+// 计算 5 个分项奖
+function computeAwards() {
+  const valid = state.airlines.filter(a => !a.bankrupt && state.careerStats[a.id]);
+  const award = (key, name, icon, desc, scoreFn, fmtFn) => {
+    let best = null, bestScore = -Infinity, bestStats = null;
+    for (const al of valid) {
+      const cs = state.careerStats[al.id];
+      const s = scoreFn(cs, al);
+      if (s !== null && s > bestScore) { bestScore = s; best = al; bestStats = cs; }
+    }
+    return { key, name, icon, desc, winner: best, statText: best ? fmtFn(bestScore, bestStats) : '—' };
+  };
+  return [
+    award('profit', '利润王', '🏆', '累计净利润最高',
+      cs => cs.totalProfit,
+      v => `累计 $${fmt(v)}M 净利`),
+    award('network', '网络帝国', '🌐', '航线数 × 拥有城市数 最高',
+      (cs, al) => al.routes.length * new Set(al.routes.flatMap(r => [r.fromCity, r.toCity])).size,
+      v => `${v} 网络分`),
+    award('green', '绿色先锋', '🌱', '单位载客油耗最低（节能效率）',
+      (cs) => cs.totalSeatKm > 0 ? -(cs.totalFuelLiters / cs.totalSeatKm) : null,
+      (v, cs) => `每座公里 ${(cs.totalFuelLiters / cs.totalSeatKm).toFixed(3)} L`),
+    award('prestige', '奢华品牌', '⭐', '终局声望最高',
+      (cs, al) => al.prestige,
+      v => `声望 ${Math.round(v)}`),
+    award('load', '准时大师', '🛬', '全程平均载荷率最高',
+      cs => cs.lfCount > 0 ? cs.lfSum / cs.lfCount : null,
+      v => `均载荷 ${Math.round(v * 100)}%`),
+  ];
 }
 
 // ===== 菜单 (三档: 保存 / 读取 / 回到首页) =====

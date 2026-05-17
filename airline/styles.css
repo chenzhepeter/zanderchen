@@ -62,6 +62,26 @@ input, select { font-size: 14px; }
   max-width: 320px; margin: 0 auto;
 }
 .menu-buttons button { font-size: 16px; padding: 14px 24px; }
+/* Difficulty selector on airline picker */
+.difficulty-pick {
+  display: flex; gap: 6px; align-items: center; justify-content: center;
+  margin: 0 0 4px; flex-wrap: wrap;
+}
+.diff-btn {
+  appearance: none; border: 1px solid var(--border); background: #fff;
+  border-radius: 999px; padding: 6px 16px; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--ink);
+  transition: all 0.15s;
+}
+.diff-btn:hover { background: var(--primary-soft); }
+.diff-btn.active {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+.diff-summary {
+  text-align: center; margin: 0 0 14px; line-height: 1.5;
+  padding: 0 12px;
+}
+
 .airline-pick {
   display: grid; gap: 14px; margin: 6px 0 18px;
   grid-template-columns: 1fr 1fr;
@@ -457,6 +477,54 @@ button.mini:hover { background: var(--primary-soft); }
 .rec-info { background: #ecfeff; border-left: 3px solid var(--primary); }
 .rec-warn { background: #fff7ed; border-left: 3px solid var(--warn); }
 .rec-icon { font-size: 18px; flex-shrink: 0; }
+.rec-body { flex: 1; min-width: 0; }
+.rec-text { font-weight: 500; }
+.rec-reason {
+  font-size: 12px; color: var(--muted);
+  margin-top: 4px; line-height: 1.5;
+  padding-top: 4px; border-top: 1px dashed var(--border);
+}
+.rec-why { color: var(--primary-dark); font-weight: 600; margin-right: 4px; }
+
+/* Awards grid in end-game modal */
+.awards-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin: 8px 0;
+}
+.award-card {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px; border-radius: 10px;
+  background: #f8fafc; border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+.award-card.mine {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border-color: #f59e0b; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+.award-icon { font-size: 28px; flex-shrink: 0; line-height: 1; }
+.award-info { flex: 1; min-width: 0; }
+.award-name { font-weight: 700; font-size: 15px; margin-bottom: 2px; }
+.award-winner { font-size: 13px; margin-bottom: 4px; }
+.award-winner b { font-weight: 600; }
+.award-desc { font-size: 11px; line-height: 1.4; }
+
+/* Term help button (?) — small inline tooltip trigger */
+.term-help {
+  appearance: none; border: 1px solid var(--border);
+  background: #fff; color: var(--muted);
+  width: 18px; height: 18px;
+  padding: 0; margin: 0 0 0 4px;
+  border-radius: 50%;
+  font-size: 11px; font-weight: 700;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  vertical-align: middle;
+  transition: all 0.12s;
+}
+.term-help:hover {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
 
 /* Menu sections */
 .menu-section { margin-bottom: 14px; }

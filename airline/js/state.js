@@ -4,9 +4,17 @@ import { CITIES, CITY_BY_ID, distanceKm, recomputeCityStates } from './data/citi
 
 export const STORAGE_KEY = 'airline.save';
 export const SLOT_KEY = (i) => `airline.slot.${i}`;
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 export const NUM_SLOTS = 5;
-export const APP_VERSION = '2026.5.17.1';
+export const APP_VERSION = '2026.5.17.2';
+
+// 难度配置：影响初始现金、AI 性格降级、事件强度收敛
+// 玩家在 showAirlinePicker 选择难度，存档到 state.difficulty
+export const DIFFICULTY = {
+  easy:   { label: '简单', cashMult: 1.4,  eventConverge: 0.30, aiDowngrade: 1,  maxAiActions: 2 },
+  normal: { label: '标准', cashMult: 1.0,  eventConverge: 0.00, aiDowngrade: 0,  maxAiActions: 3 },
+  hard:   { label: '困难', cashMult: 0.85, eventConverge: -0.10, aiDowngrade: -1, maxAiActions: 3 },
+};
 
 // 单例 GameState
 // 注意: route 现在只挂 1 架飞机（route.aircraftUid，可为 null）；同一城市对允许多条独立航线
@@ -15,6 +23,8 @@ export const state = {
   year: 2000,
   quarter: 1,
   playerId: null,
+  difficulty: 'normal',
+  careerStats: {},  // airlineId → { totalProfit, totalPassengers, totalFuelLiters, lfSum, lfCount }
   airlines: [],
   fuelPrice: 1.0,
   fuelPriceBase: 1.0,
@@ -41,11 +51,13 @@ function quickBreakEven(distKm, fromCity, toCity, fuelPrice) {
   return Math.max(20, Math.round(fuelPerSeat + opPerSeat));
 }
 
-export function initNewGame(playerId) {
+export function initNewGame(playerId, difficulty = 'normal') {
   state.version = SAVE_VERSION;
   state.year = 2000;
   state.quarter = 1;
   state.playerId = playerId;
+  state.difficulty = DIFFICULTY[difficulty] ? difficulty : 'normal';
+  state.careerStats = {};  // 终局分项奖累计统计
   state.fuelPrice = 1.0;
   state.fuelPriceBase = 1.0;
   state.activeEffects = [];
@@ -97,6 +109,7 @@ export function initNewGame(playerId) {
       r.fare = Math.round(quickBreakEven(dist, CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity], 1.0) * 2.0);
       r._committed = { fare: r.fare, aircraftUid: r.aircraftUid };
     }
+    const diffCfg = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
     return {
       id: tmpl.id,
       codeIATA: tmpl.codeIATA,
@@ -105,23 +118,30 @@ export function initNewGame(playerId) {
       country: tmpl.country,
       hubCity: tmpl.hubCity,
       color: tmpl.color,
-      cash: tmpl.initialCash,
+      cash: Math.round(tmpl.initialCash * diffCfg.cashMult),
       prestige: tmpl.initialPrestige,
       prestigePerQuarter: 0,
       aircraft,
       routes,
       landingRights: Array.from(landingRights),
-      aiProfile: isPlayer ? null : pickAiProfile(tmpl.id),
+      aiProfile: isPlayer ? null : pickAiProfile(tmpl.id, diffCfg.aiDowngrade),
       isPlayer,
       bankrupt: false,
     };
   });
 }
 
-function pickAiProfile(id) {
+// AI 难度调档：+1 = 升一档（保守→平衡→进取），-1 = 降一档
+const PROFILE_LADDER = ['conservative', 'balanced', 'aggressive'];
+function pickAiProfile(id, shift = 0) {
   // 4 家航司: CCA 进取 / DAL 平衡 / IBE 保守 / SIA 平衡
   const map = { CCA: 'aggressive', DAL: 'balanced', IBE: 'conservative', SIA: 'balanced' };
-  return map[id] || 'balanced';
+  const base = map[id] || 'balanced';
+  const idx = PROFILE_LADDER.indexOf(base);
+  // 简单难度 (shift=1) → 降一档：进取→平衡→保守
+  // 困难难度 (shift=-1) → 升一档：保守→平衡→进取
+  const newIdx = Math.max(0, Math.min(PROFILE_LADDER.length - 1, idx - shift));
+  return PROFILE_LADDER[newIdx];
 }
 
 export function getPlayer() { return state.airlines.find(a => a.id === state.playerId); }
@@ -158,6 +178,8 @@ function buildPayload() {
     state: {
       year: state.year, quarter: state.quarter,
       playerId: state.playerId,
+      difficulty: state.difficulty,
+      careerStats: state.careerStats,
       fuelPrice: state.fuelPrice, fuelPriceBase: state.fuelPriceBase,
       activeEffects: state.activeEffects,
       eventLog: state.eventLog,
@@ -183,6 +205,8 @@ function applyPayload(p) {
   }
   Object.assign(state, p.state);
   if (!state.thisTurnActions) state.thisTurnActions = [];
+  if (!state.careerStats) state.careerStats = {};
+  if (!state.difficulty) state.difficulty = 'normal';
   uidCounter = p.counters?.uid || 1;
   routeCounter = p.counters?.route || 1;
   return { ok: true };

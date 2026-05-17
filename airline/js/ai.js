@@ -1,4 +1,4 @@
-import { state } from './state.js';
+import { state, DIFFICULTY } from './state.js';
 import { CITIES, CITY_BY_ID, distanceKm } from './data/cities.js';
 import { AIRCRAFT, AIRCRAFT_BY_ID } from './data/aircraft.js';
 import {
@@ -9,17 +9,23 @@ import {
 import { logAiAction } from './intel.js';
 
 // AI 配置：保守 / 标准 / 进取
-// 全局上调买机/开线上限到 3（更激进）
+// maxBuysPerTurn / maxOpensPerTurn 在 runtime 由难度 (DIFFICULTY.maxAiActions) 覆盖
 const PROFILE = {
-  conservative: { cashBuffer: 0.45, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 1.05, maxCompetitors: 2 },
-  balanced:     { cashBuffer: 0.30, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 1.00, maxCompetitors: 3 },
-  aggressive:   { cashBuffer: 0.15, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 0.92, maxCompetitors: 3 },
+  conservative: { cashBuffer: 0.45, fareMult: 1.05, maxCompetitors: 2 },
+  balanced:     { cashBuffer: 0.30, fareMult: 1.00, maxCompetitors: 3 },
+  aggressive:   { cashBuffer: 0.15, fareMult: 0.92, maxCompetitors: 3 },
 };
+
+function profileWithDifficulty(base) {
+  const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
+  const cap = diff.maxAiActions ?? 3;
+  return { ...base, maxBuysPerTurn: cap, maxOpensPerTurn: cap };
+}
 
 export function runAiTurn() {
   for (const al of state.airlines) {
     if (al.isPlayer || al.bankrupt) continue;
-    const profile = PROFILE[al.aiProfile] || PROFILE.balanced;
+    const profile = profileWithDifficulty(PROFILE[al.aiProfile] || PROFILE.balanced);
     aiActOnce(al, profile);
   }
 }
