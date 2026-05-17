@@ -36,7 +36,7 @@ export const EVENTS = [
     choice: {
       prompt: '是否额外投入 5 亿美元加强机队安保？',
       options: [
-        { label: '投入 5 亿（声望 +5）', costCash: 500, applyEffects: [{ kind: 'prestige', delta: 5, target: 'self' }] },
+        { label: '投入 $100M（声望 +5）', costCash: 100, applyEffects: [{ kind: 'prestige', delta: 5, target: 'self' }] },
         { label: '不投入', applyEffects: [] },
       ],
     },
@@ -406,7 +406,7 @@ export const EVENTS = [
     choice: {
       prompt: '政府提供一次性救助补贴 — 是否申请？',
       options: [
-        { label: '申请 $1000M 救助补贴（避免破产）', applyEffects: [{ kind: 'cashGrant', amount: 1000 }] },
+        { label: '申请 $100M 救助补贴', applyEffects: [{ kind: 'cashGrant', amount: 100 }] },
         { label: '婉拒，自力更生（声望 +10）', applyEffects: [{ kind: 'prestige', delta: 10, target: 'self' }] },
       ],
     },
@@ -534,7 +534,7 @@ export const EVENTS = [
     choice: {
       prompt: '是否参与人道主义运输（免费包机救灾物资）？',
       options: [
-        { label: '参与（声望 +6，花费 $80M）', costCash: 80, applyEffects: [{ kind: 'prestige', delta: 6, target: 'self' }] },
+        { label: '参与（声望 +6，花费 $100M）', costCash: 100, applyEffects: [{ kind: 'prestige', delta: 6, target: 'self' }] },
         { label: '不参与', applyEffects: [] },
       ],
     },
