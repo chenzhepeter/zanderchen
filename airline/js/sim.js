@@ -218,7 +218,8 @@ export function simulateQuarterOperations() {
       const fuelDistMult = fuelDistanceMultFor(x.from, x.to);
       const fuelCost = passengers * x.dist * fuelDistMult * acModel.fuelPerSeatKm * state.fuelPrice * 0.60;
       const flights = FLIGHTS_PER_QUARTER;
-      const landingFeeMult = acModel.landingFeeMult || 1.0;
+      // 着陆费按座位数与 A320 (180 座) 成正比 —— 大机绝对付得多，但每座成本相等
+      const landingFeeMult = acModel.capacity / 180;
       const landingCostM = flights * (5 + (x.from.size + x.to.size)) * landingFeeMult / 1000;
       const serviceCostM = passengers * 22 / 1e6;
       let safetyCostM = 0;
@@ -558,7 +559,8 @@ export function computeBreakEvenFare(airline, route) {
 
 // 推荐默认票价：盈亏平衡 × 2.0 (50% 毛利率)
 export function recommendedFare(airline, route) {
-  return Math.round(computeBreakEvenFare(airline, route) * 2.0);
+  // ×1.6 (was ×2.0)：压缩 monopoly 加价空间。AI 上限 ×1.5 不变 → max fare = breakEven ×2.4 (was ×3.0)
+  return Math.round(computeBreakEvenFare(airline, route) * 1.6);
 }
 
 // === 事件影响 → 人类可读描述 ===

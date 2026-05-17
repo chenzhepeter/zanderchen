@@ -4,7 +4,7 @@ import { AIRCRAFT, AIRCRAFT_BY_ID } from './data/aircraft.js';
 import {
   buyAircraft, openRoute, assignAircraftToRoute,
   applyForLanding, setFare, closeRoute, recommendedFare,
-  applyChoiceOption,
+  applyChoiceOption, routesAtCity, cityRouteSlots,
 } from './sim.js';
 import { logAiAction } from './intel.js';
 
@@ -95,7 +95,7 @@ function aiActOnce(al, profile) {
     }
   }
 
-  // 2) 调价 — 围绕推荐价（盈亏平衡 ×2）±50% 的区间内调整
+  // 2) 调价 — 围绕推荐价（盈亏平衡 ×1.6）±50% 的区间内调整
   for (const r of al.routes) {
     const oldFare = r.fare;
     const ideal = recommendedFare(al, r);
@@ -185,48 +185,30 @@ function pickModelForDistance(al, dist) {
   return affordable[Math.floor(affordable.length / 3)];
 }
 
-// 综合分（与 ui.js renderLeaderboard 一致）
-function compositeScore(al) {
-  return al.cash + al.aircraft.length * 30 + al.routes.length * 20 + al.prestige * 5;
-}
-
-// 选最佳新航线：偏向高需求 + 主动追打领头羊 + 避开仅由弱者占据的航线
+// 选最佳新航线：纯自身利润最大化。
+// 评分 = 预期收益（hotness × 我能拿到的份额）
+// 不考虑对手的相对实力，只考虑这条线对自己赚钱的潜力。
+// 槽位预判：如果两端任一城市槽位已满，直接跳过这对（否则 openRoute 会失败）。
 function bestNewRoute(al, maxRange, profile) {
   const rights = al.landingRights;
   const ownPairs = new Set(al.routes.map(r => pairKey(r.fromCity, r.toCity)));
-
-  // 找出当前积分最高的对手（领头羊）。自己 / 破产 排除。
-  let leader = null, leaderScore = -Infinity;
-  for (const x of state.airlines) {
-    if (x.id === al.id || x.bankrupt) continue;
-    const s = compositeScore(x);
-    if (s > leaderScore) { leader = x; leaderScore = s; }
-  }
-  const leaderPairs = new Set(leader ? leader.routes.map(r => pairKey(r.fromCity, r.toCity)) : []);
-
   let best = null;
   for (let i = 0; i < rights.length; i++) {
     for (let j = i + 1; j < rights.length; j++) {
       const idA = rights[i], idB = rights[j];
-      const pk = pairKey(idA, idB);
-      if (ownPairs.has(pk)) continue;
+      if (ownPairs.has(pairKey(idA, idB))) continue;
       const a = CITY_BY_ID[idA], b = CITY_BY_ID[idB];
+      // 槽位预判 — 跳过两端已经爆满的城市对
+      if (routesAtCity(idA) >= cityRouteSlots(a)) continue;
+      if (routesAtCity(idB) >= cityRouteSlots(b)) continue;
       const dist = distanceKm(a, b);
       if (dist < 400 || dist > maxRange) continue;
       const competitors = countAirlinesOnPair(idA, idB);
-
-      const leaderOnPair = leaderPairs.has(pk);
-      // 追领头时放宽竞争上限 (+2)，否则按 profile.maxCompetitors+1
-      const maxComp = profile.maxCompetitors + 1 + (leaderOnPair ? 2 : 0);
-      if (competitors >= maxComp) continue;
-
+      if (competitors >= profile.maxCompetitors + 1) continue;
+      // 预期份额 ≈ 1 / (1 + 已有竞争者)；hotness 是市场大小代理
       const hotness = a.baseDemand * a.size + b.baseDemand * b.size;
-      let score = hotness - 250 * competitors;
-      // 反领头羊：领头在此航线 → 大幅加分（积极围攻）
-      if (leaderOnPair) score += 1500;
-      // 避弱：有竞争但领头不在 → 主要是弱者在飞，避开
-      else if (competitors > 0) score -= 400;
-
+      const expectedShare = 1 / (1 + competitors);
+      const score = hotness * expectedShare;
       if (!best || score > best.score) best = { from: idA, to: idB, dist, score, competitors };
     }
   }
