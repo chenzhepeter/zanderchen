@@ -478,10 +478,10 @@ export const EVENTS = [
   {
     id: 'ev_paris_olympics',
     triggerYear: 2024, triggerQuarter: 3,
-    nameZh: '巴黎奥运会',
-    descZh: '巴黎举办奥运，欧洲航线全面火爆。',
+    nameZh: '柏林田径世锦赛 2024',
+    descZh: '柏林举办夏季田径世锦赛，欧洲航线短期火爆，德国受益最大。',
     effects: [
-      { kind: 'demand', scope: 'country:FR', mult: 1.45, durationQuarters: 1 },
+      { kind: 'demand', scope: 'country:DE', mult: 1.30, durationQuarters: 1 },
       { kind: 'demand', scope: 'region:europe', mult: 1.15, durationQuarters: 1 },
     ],
   },
@@ -573,15 +573,14 @@ export const EVENTS = [
     ],
   },
 
-  // 2015: 巴黎恐袭
+  // 2015: 欧洲恐袭潮
   {
     id: 'ev_paris_attack',
     triggerYear: 2015, triggerQuarter: 4,
-    nameZh: '巴黎 11·13 恐袭',
-    descZh: '巴塔克兰剧院系列恐袭震惊欧洲，国际游客减少。',
+    nameZh: '欧洲恐袭潮',
+    descZh: '欧洲多个城市发生连环袭击，国际游客大幅减少，欧洲航线信心受挫。',
     effects: [
-      { kind: 'demand', scope: 'country:FR', mult: 0.78, durationQuarters: 2 },
-      { kind: 'demand', scope: 'region:europe', mult: 0.92, durationQuarters: 2 },
+      { kind: 'demand', scope: 'region:europe', mult: 0.85, durationQuarters: 2 },
     ],
   },
 

@@ -1,4 +1,5 @@
-// 4 家可选航司。初始现金 -40%、初始机队 -~40%，更依赖经营赚钱扩张
+// 4 家 AI 巨头 + 1 玩家模板（STR 星途航空）
+// 玩家不再从 4 巨头里选 — 玩家代表 STR 新进入者，挑选基地后才填充 hubCity。
 
 export const AIRLINES = [
   {
@@ -38,27 +39,27 @@ export const AIRLINES = [
     ],
     initialRoutes: [
       ['JFK', 'LAX'], ['JFK', 'YVR'], ['JFK', 'MEX'],
-      ['JFK', 'CDG'], ['JFK', 'LHR'],
+      ['JFK', 'FRA'], ['JFK', 'LHR'],
     ],
   },
   {
-    id: 'IBE',
-    codeIATA: 'IB',
-    nameZh: '伊比利亚航空',
-    nameShort: '伊航',
-    country: 'ES',
-    hubCity: 'MAD',
-    color: '#f59e0b',
-    initialCash: 780,
-    initialPrestige: 55,
+    id: 'DLH',
+    codeIATA: 'LH',
+    nameZh: '汉莎航空',
+    nameShort: '汉莎',
+    country: 'DE',
+    hubCity: 'FRA',
+    color: '#eab308',
+    initialCash: 800,
+    initialPrestige: 65,
     initialFleet: [
-      { modelId: 'A320', count: 3 },
       { modelId: 'A330', count: 2 },
-      { modelId: '767',  count: 1 },
+      { modelId: 'A320', count: 2 },
+      { modelId: '767',  count: 2 },
     ],
     initialRoutes: [
-      ['MAD', 'LHR'], ['MAD', 'CDG'], ['MAD', 'JFK'],
-      ['MAD', 'GRU'], ['MAD', 'MEX'],
+      ['FRA', 'LHR'], ['FRA', 'JFK'], ['FRA', 'DXB'],
+      ['FRA', 'PEK'], ['FRA', 'HKG'],
     ],
   },
   {
@@ -84,3 +85,20 @@ export const AIRLINES = [
 ];
 
 export const AIRLINE_BY_ID = Object.fromEntries(AIRLINES.map(a => [a.id, a]));
+
+// 玩家航司模板（hubCity / country 由 initNewGame 在玩家选定后填入）
+export const PLAYER_TEMPLATE = {
+  id: 'STR',
+  codeIATA: 'XJ',
+  nameZh: '星途航空',
+  nameShort: '星途',
+  country: 'INT',
+  hubCity: null,
+  color: '#7c3aed',
+  initialCash: 300,
+  initialPrestige: 35,
+  initialFleet: [
+    { modelId: 'ERJ145', count: 1 },
+  ],
+  initialRoutes: [],  // 空——玩家从零搭网络
+};

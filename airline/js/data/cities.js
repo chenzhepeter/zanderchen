@@ -32,7 +32,7 @@ export const CITIES = [
   // ==== 欧洲 (4) ====
   { id: 'LHR', nameZh: '伦敦',       iata: 'LHR', lat: 51.47, lng: -0.45,  region: 'europe',   country: 'GB',
     baseSizeAt2000: 5, sizeHistory: [] },
-  { id: 'CDG', nameZh: '巴黎',       iata: 'CDG', lat: 49.01, lng: 2.55,   region: 'europe',   country: 'FR',
+  { id: 'FRA', nameZh: '法兰克福',   iata: 'FRA', lat: 50.04, lng: 8.56,   region: 'europe',   country: 'DE',
     baseSizeAt2000: 5, sizeHistory: [] },
   { id: 'MAD', nameZh: '马德里',     iata: 'MAD', lat: 40.49, lng: -3.57,  region: 'europe',   country: 'ES',
     baseSizeAt2000: 4, sizeHistory: [] },

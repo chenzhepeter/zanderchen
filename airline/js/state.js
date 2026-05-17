@@ -1,12 +1,15 @@
-import { AIRLINES } from './data/airlines.js';
+import { AIRLINES, PLAYER_TEMPLATE } from './data/airlines.js';
 import { AIRCRAFT_BY_ID } from './data/aircraft.js';
 import { CITIES, CITY_BY_ID, distanceKm, recomputeCityStates } from './data/cities.js';
 
 export const STORAGE_KEY = 'airline.save';
 export const SLOT_KEY = (i) => `airline.slot.${i}`;
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 export const NUM_SLOTS = 5;
-export const APP_VERSION = '2026.5.17.3';
+export const APP_VERSION = '2026.5.17.4';
+
+// 玩家航司 id（固定为星途航空 STR）
+export const PLAYER_ID = PLAYER_TEMPLATE.id;
 
 // 单例 GameState
 // 注意: route 现在只挂 1 架飞机（route.aircraftUid，可为 null）；同一城市对允许多条独立航线
@@ -15,6 +18,7 @@ export const state = {
   year: 2000,
   quarter: 1,
   playerId: null,
+  playerHub: null,  // 玩家选定的基地城市 ID
   airlines: [],
   fuelPrice: 1.0,
   fuelPriceBase: 1.0,
@@ -41,11 +45,70 @@ function quickBreakEven(distKm, fromCity, toCity, fuelPrice) {
   return Math.max(20, Math.round(fuelPerSeat + opPerSeat));
 }
 
-export function initNewGame(playerId) {
+// 把模板转成 runtime airline 对象（含航线骨架 + 兼容飞机的初始分配 + 票价）
+function buildAirlineFromTemplate(tmpl, isPlayer) {
+  const aircraft = [];
+  for (const { modelId, count } of tmpl.initialFleet) {
+    for (let i = 0; i < count; i++) {
+      // AI 飞机有年龄随机化（模拟既有运营）；玩家飞机全新（age 0）
+      const age = isPlayer ? 0 : Math.floor(Math.random() * 20);
+      aircraft.push({ uid: newUid(), modelId, ageQuarters: age, routeId: null, grounded: false });
+    }
+  }
+  const landingRights = new Set([tmpl.hubCity]);
+  for (const [fromId, toId] of tmpl.initialRoutes) {
+    landingRights.add(fromId);
+    landingRights.add(toId);
+  }
+  // 路线骨架
+  const routes = tmpl.initialRoutes.map(([fromId, toId]) => ({
+    id: newRouteId(),
+    ownerId: tmpl.id,
+    fromCity: fromId,
+    toCity: toId,
+    fare: 0,
+    aircraftUid: null,
+    lastLoadFactor: 0.75,
+    lastProfit: 0,
+    _committed: null,
+  }));
+  // 按距离从长到短分配兼容飞机
+  const byDist = routes.map(r => ({
+    r, dist: distanceKm(CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity]),
+  })).sort((a, b) => b.dist - a.dist);
+  for (const { r, dist } of byDist) {
+    const ac = aircraft.find(a => !a.routeId && AIRCRAFT_BY_ID[a.modelId].rangeKm >= dist);
+    if (ac) { ac.routeId = r.id; r.aircraftUid = ac.uid; }
+    r.fare = Math.round(quickBreakEven(dist, CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity], 1.0) * 2.0);
+    r._committed = { fare: r.fare, aircraftUid: r.aircraftUid };
+  }
+  return {
+    id: tmpl.id,
+    codeIATA: tmpl.codeIATA,
+    nameZh: tmpl.nameZh,
+    nameShort: tmpl.nameShort,
+    country: tmpl.country,
+    hubCity: tmpl.hubCity,
+    color: tmpl.color,
+    cash: tmpl.initialCash,
+    prestige: tmpl.initialPrestige,
+    prestigePerQuarter: 0,
+    aircraft,
+    routes,
+    landingRights: Array.from(landingRights),
+    aiProfile: isPlayer ? null : pickAiProfile(tmpl.id),
+    isPlayer,
+    bankrupt: false,
+  };
+}
+
+// 玩家代表星途航空 (STR)，开局选择一个 3/4 星城市作为基地。
+export function initNewGame(playerHubCityId) {
   state.version = SAVE_VERSION;
   state.year = 2000;
   state.quarter = 1;
-  state.playerId = playerId;
+  state.playerId = PLAYER_ID;
+  state.playerHub = playerHubCityId;
   state.fuelPrice = 1.0;
   state.fuelPriceBase = 1.0;
   state.activeEffects = [];
@@ -61,66 +124,24 @@ export function initNewGame(playerId) {
   routeCounter = 1;
   recomputeCityStates(2000);
 
-  state.airlines = AIRLINES.map(tmpl => {
-    const isPlayer = tmpl.id === playerId;
-    const aircraft = [];
-    for (const { modelId, count } of tmpl.initialFleet) {
-      for (let i = 0; i < count; i++) {
-        aircraft.push({ uid: newUid(), modelId, ageQuarters: Math.floor(Math.random() * 20), routeId: null, grounded: false });
-      }
-    }
-    const landingRights = new Set([tmpl.hubCity]);
-    for (const [fromId, toId] of tmpl.initialRoutes) {
-      landingRights.add(fromId);
-      landingRights.add(toId);
-    }
-    // 路线骨架（不带飞机和票价）
-    const routes = tmpl.initialRoutes.map(([fromId, toId]) => ({
-      id: newRouteId(),
-      ownerId: tmpl.id,
-      fromCity: fromId,
-      toCity: toId,
-      fare: 0,
-      aircraftUid: null,
-      lastLoadFactor: 0.75,
-      lastProfit: 0,
-      _committed: null,  // 季末提交的"基线"，revert 用
-    }));
-    // 按距离从长到短分配兼容飞机，确保长航线先拿到大飞机
-    const byDist = routes.map(r => ({
-      r, dist: distanceKm(CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity]),
-    })).sort((a, b) => b.dist - a.dist);
-    for (const { r, dist } of byDist) {
-      const ac = aircraft.find(a => !a.routeId && AIRCRAFT_BY_ID[a.modelId].rangeKm >= dist);
-      if (ac) { ac.routeId = r.id; r.aircraftUid = ac.uid; }
-      // 默认票价: 盈亏平衡价 × 2.0（50% 毛利率）
-      r.fare = Math.round(quickBreakEven(dist, CITY_BY_ID[r.fromCity], CITY_BY_ID[r.toCity], 1.0) * 2.0);
-      r._committed = { fare: r.fare, aircraftUid: r.aircraftUid };
-    }
-    return {
-      id: tmpl.id,
-      codeIATA: tmpl.codeIATA,
-      nameZh: tmpl.nameZh,
-      nameShort: tmpl.nameShort,
-      country: tmpl.country,
-      hubCity: tmpl.hubCity,
-      color: tmpl.color,
-      cash: tmpl.initialCash,
-      prestige: tmpl.initialPrestige,
-      prestigePerQuarter: 0,
-      aircraft,
-      routes,
-      landingRights: Array.from(landingRights),
-      aiProfile: isPlayer ? null : pickAiProfile(tmpl.id),
-      isPlayer,
-      bankrupt: false,
-    };
-  });
+  // 4 家 AI 巨头
+  const ai = AIRLINES.map(tmpl => buildAirlineFromTemplate(tmpl, false));
+
+  // 玩家：以选定城市为基地的星途航空
+  const hubCity = CITY_BY_ID[playerHubCityId];
+  const playerTmpl = {
+    ...PLAYER_TEMPLATE,
+    hubCity: playerHubCityId,
+    country: hubCity ? hubCity.country : 'INT',
+  };
+  const player = buildAirlineFromTemplate(playerTmpl, true);
+
+  state.airlines = [...ai, player];
 }
 
 function pickAiProfile(id) {
-  // 4 家航司: CCA 进取 / DAL 平衡 / IBE 保守 / SIA 平衡
-  const map = { CCA: 'aggressive', DAL: 'balanced', IBE: 'conservative', SIA: 'balanced' };
+  // 4 家 AI: CCA 进取 / DAL 平衡 / DLH 平衡 / SIA 平衡
+  const map = { CCA: 'aggressive', DAL: 'balanced', DLH: 'balanced', SIA: 'balanced' };
   return map[id] || 'balanced';
 }
 
@@ -158,6 +179,7 @@ function buildPayload() {
     state: {
       year: state.year, quarter: state.quarter,
       playerId: state.playerId,
+      playerHub: state.playerHub,
       fuelPrice: state.fuelPrice, fuelPriceBase: state.fuelPriceBase,
       activeEffects: state.activeEffects,
       eventLog: state.eventLog,
