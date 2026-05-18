@@ -1,0 +1,35 @@
+#!/bin/bash
+# pre-commit: auto-bump airline/js/state.js APP_VERSION to YYYY.M.D.N
+# where N = (北京时间当天已存在的 commit 数 + 1)
+# 仅在 airline/ 目录有变化时更新（避免无关 commit 触发 bump）。
+
+set -e
+
+STATE_FILE="airline/js/state.js"
+[ -f "$STATE_FILE" ] || exit 0
+
+# 仅当本次 commit 涉及 airline/ 时才 bump
+if ! git diff --cached --name-only | grep -q '^airline/'; then
+  exit 0
+fi
+
+# 北京时间日期 + 当天起始时刻
+BJ_DATE=$(TZ='Asia/Shanghai' date +'%Y.%-m.%-d')
+BJ_DAY_START="$(TZ='Asia/Shanghai' date +'%Y-%m-%d') 00:00:00 +0800"
+
+# 当天已有 commit 数
+COUNT=$(git log --since="$BJ_DAY_START" --oneline 2>/dev/null | wc -l | tr -d ' ')
+NEW_N=$((COUNT + 1))
+NEW_VERSION="${BJ_DATE}.${NEW_N}"
+
+CURRENT=$(grep "export const APP_VERSION" "$STATE_FILE" | sed "s/.*'\([^']*\)'.*/\1/")
+
+if [ "$CURRENT" != "$NEW_VERSION" ]; then
+  # macOS BSD sed and GNU sed both accept this -i.bak form
+  sed -i.bak "s/export const APP_VERSION = '[^']*'/export const APP_VERSION = '$NEW_VERSION'/" "$STATE_FILE"
+  rm -f "${STATE_FILE}.bak"
+  git add "$STATE_FILE"
+  echo "[pre-commit] APP_VERSION: $CURRENT → $NEW_VERSION"
+fi
+
+exit 0
