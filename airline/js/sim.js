@@ -1,4 +1,8 @@
-import { state, commitAllRouteSnapshots } from './state.js';
+import {
+  state, commitAllRouteSnapshots,
+  INTEREST_RATE_PER_QUARTER, CREDIT_BASELINE, CREDIT_CAP,
+  DISTRESS_LOSS_THRESHOLD, DISTRESS_MULT, PROFIT_HISTORY_LEN,
+} from './state.js';
 import { CITY_BY_ID, distanceKm, recomputeCityStates, SLOTS_BY_SIZE } from './data/cities.js';
 import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
@@ -366,19 +370,56 @@ export function fleetMaintDiscountInfo(airline) {
 export function applyEndOfQuarterFinance() {
   for (const al of state.airlines) {
     if (al.bankrupt) continue;
+    const rep = state.lastQuarterReports[al.id];
+
+    // 1) 维护费
     let maint = 0;
     for (const ac of al.aircraft) maint += AIRCRAFT_BY_ID[ac.modelId].maintenancePerQuarter;
     maint *= MAINT_FACTOR;
     const dInfo = fleetMaintDiscountInfo(al);
     if (dInfo.eligible) maint = maint * (1 - dInfo.discount);
     al.cash -= maint;
-    state.lastQuarterReports[al.id].maintenance = maint;
-    state.lastQuarterReports[al.id].maintDiscount = dInfo.eligible ? dInfo : null;
+    if (rep) {
+      rep.maintenance = maint;
+      rep.maintDiscount = dInfo.eligible ? dInfo : null;
+    }
 
+    // 2) 利息支出（按本季初未偿债务计息；现金不足则未付利息复利入本金）
+    if (!al.debt) al.debt = 0;
+    const interestDue = al.debt * INTEREST_RATE_PER_QUARTER;
+    if (interestDue > 0) {
+      if (al.cash >= interestDue) {
+        al.cash -= interestDue;
+      } else {
+        // 现金不够付利息 → 未付部分加入本金（复利惩罚）
+        const paid = Math.max(0, al.cash);
+        al.cash -= paid;
+        al.debt += (interestDue - paid);
+      }
+    }
+    if (rep) rep.interest = interestDue;
+
+    // 3) 机龄 + 声望增长
     for (const ac of al.aircraft) ac.ageQuarters += 1;
     if (al.prestigePerQuarter) al.prestige += al.prestigePerQuarter;
 
-    // AI 现金告急 → 卖最便宜的飞机直到现金回正或无机可卖
+    // 4) 累计本季净利到 profitHistory（用于下季的信用额度计算）
+    if (!al.profitHistory) al.profitHistory = [];
+    const netQ = rep ? (rep.revenue - rep.fuel - rep.landing - rep.service - rep.safety - maint - interestDue) : -maint - interestDue;
+    al.profitHistory.push(netQ);
+    if (al.profitHistory.length > PROFIT_HISTORY_LEN) al.profitHistory.shift();
+
+    // 5) AI 现金告急 → 先借后卖
+    if (!al.isPlayer && al.cash < 50) {
+      const avail = creditLimit(al);
+      if (avail > 0) {
+        const borrowAmt = Math.min(avail, 100);
+        borrow(al, borrowAmt);
+        logAiAction(al.id, 'borrow', `借款 $${borrowAmt.toFixed(0)}M（防御性）`);
+      }
+    }
+
+    // 6) 仍然现金 < 0 → 紧急卖飞机
     if (!al.isPlayer && al.cash < 0) {
       while (al.cash < 0 && al.aircraft.length > 0) {
         const sorted = [...al.aircraft].sort((a, b) => {
@@ -394,9 +435,46 @@ export function applyEndOfQuarterFinance() {
       }
       if (al.cash < 0 && al.aircraft.length === 0) al.bankrupt = true;
     }
-    // 玩家现金 < 0 且无机可卖：UI 端会判定为破产
     if (al.isPlayer && al.cash < 0 && al.aircraft.length === 0) al.bankrupt = true;
+
+    // 7) AI 自动还款：现金充裕时减半未偿
+    if (!al.isPlayer && al.debt > 0 && al.cash > al.debt * 5) {
+      const repayAmt = al.debt * 0.5;
+      repay(al, repayAmt);
+      logAiAction(al.id, 'repay', `还款 $${repayAmt.toFixed(0)}M`);
+    }
   }
+}
+
+// === 借款机制 ===
+export function creditLimit(airline) {
+  if (airline.bankrupt) return 0;
+  const history = airline.profitHistory || [];
+  const recent4Q = history.slice(-PROFIT_HISTORY_LEN).reduce((s, p) => s + p, 0);
+  const distressMult = recent4Q < DISTRESS_LOSS_THRESHOLD ? DISTRESS_MULT : 1.0;
+  const profitBonus = Math.max(0, recent4Q * 3);
+  const raw = (CREDIT_BASELINE + profitBonus + airline.prestige * 2) * distressMult;
+  return Math.max(0, Math.min(CREDIT_CAP, raw) - (airline.debt || 0));
+}
+
+export function borrow(airline, amount) {
+  if (airline.bankrupt) return { ok: false, msg: '已破产' };
+  if (amount <= 0) return { ok: false, msg: '金额需大于 0' };
+  const avail = creditLimit(airline);
+  if (amount > avail) return { ok: false, msg: `超过可借额度 ($${avail.toFixed(0)}M)` };
+  airline.cash += amount;
+  airline.debt = (airline.debt || 0) + amount;
+  return { ok: true, debt: airline.debt };
+}
+
+export function repay(airline, amount) {
+  if (!airline.debt || airline.debt <= 0) return { ok: false, msg: '无未偿债务' };
+  if (amount <= 0) return { ok: false, msg: '金额需大于 0' };
+  const actual = Math.min(amount, airline.debt, Math.max(0, airline.cash));
+  if (actual <= 0) return { ok: false, msg: '现金不足或无债务' };
+  airline.cash -= actual;
+  airline.debt -= actual;
+  return { ok: true, paid: actual, debt: airline.debt };
 }
 
 export function decayEffects() {

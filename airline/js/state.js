@@ -4,9 +4,17 @@ import { CITIES, CITY_BY_ID, distanceKm, recomputeCityStates } from './data/citi
 
 export const STORAGE_KEY = 'airline.save';
 export const SLOT_KEY = (i) => `airline.slot.${i}`;
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 export const NUM_SLOTS = 5;
-export const APP_VERSION = '2026.5.17.4';
+export const APP_VERSION = '2026.5.18.1';
+
+// 借款机制常量
+export const INTEREST_RATE_PER_QUARTER = 0.02;  // 2% / 季 ≈ 8.2% / 年
+export const CREDIT_BASELINE = 100;             // $100M 基线
+export const CREDIT_CAP = 500;                  // 总额度上限
+export const DISTRESS_LOSS_THRESHOLD = -10;     // 近 4 季累计亏 < −$10M 触发折扣
+export const DISTRESS_MULT = 0.5;               // 困境额度 ×0.5
+export const PROFIT_HISTORY_LEN = 4;            // 滚动 4 季
 
 // 玩家航司 id（固定为星途航空 STR）
 export const PLAYER_ID = PLAYER_TEMPLATE.id;
@@ -100,6 +108,9 @@ function buildAirlineFromTemplate(tmpl, isPlayer) {
     aiProfile: isPlayer ? null : pickAiProfile(tmpl.id),
     // 每季度可开 1 条线 / 买 1 架机 / 申请 1 个着陆权
     turnActions: { open: 0, buy: 0, landing: 0 },
+    // 借款机制
+    debt: 0,                  // 当前未偿债务
+    profitHistory: [],        // 滚动 4 季净利（用于信用额度计算）
     isPlayer,
     bankrupt: false,
   };

@@ -15,7 +15,9 @@ import {
   cityRouteSlots, routesAtCity,
   fleetMaintDiscountInfo, describeEvent, seedInitialQuarterReport,
   quarterSeatCapacity,
+  creditLimit, borrow, repay,
 } from './sim.js';
+import { INTEREST_RATE_PER_QUARTER } from './state.js';
 import { runAiTurn, runAiChoicesForEvent } from './ai.js';
 import { buildMapSvg, drawMapContents } from './map.js';
 import { computeCompetition, computeRecommendations } from './intel.js';
@@ -1085,7 +1087,26 @@ function showCityRoutes(cityId) {
 function renderFinance() {
   const p = getPlayer();
   const rep = state.lastQuarterReports[p.id];
-  if (!rep) return `<div class="panel"><h3>财报</h3><p class="muted">先结束一个季度查看数据。</p></div>`;
+  const limit = creditLimit(p);
+  const debt = p.debt || 0;
+  const interestQ = debt * INTEREST_RATE_PER_QUARTER;
+  const debtSection = `
+    <div class="panel">
+      <h3>💳 债务</h3>
+      <div class="debt-grid">
+        <div class="debt-card"><span class="lbl">当前未偿</span><b class="${debt > 0 ? 'neg' : ''}">$${fmt(debt)}M</b></div>
+        <div class="debt-card"><span class="lbl">信用额度</span><b>$${fmt(limit + debt)}M</b></div>
+        <div class="debt-card"><span class="lbl">可借额度</span><b class="pos">$${fmt(limit)}M</b></div>
+        <div class="debt-card"><span class="lbl">本季利息</span><b class="${interestQ > 0 ? 'neg' : ''}">$${fmt(interestQ)}M</b></div>
+      </div>
+      <div class="debt-actions">
+        <button id="borrow-btn" class="primary-btn small" ${limit <= 0 ? 'disabled' : ''}>+ 借款</button>
+        <button id="repay-btn" class="ghost-btn small" ${debt <= 0 ? 'disabled' : ''}>− 还款</button>
+        <span class="muted small">利率 ${Math.round(INTEREST_RATE_PER_QUARTER * 100 * 10) / 10}% / 季（≈ ${Math.round(INTEREST_RATE_PER_QUARTER * 4 * 100 * 10) / 10}% / 年）· 总额上限 $500M</span>
+      </div>
+    </div>
+  `;
+  if (!rep) return `${debtSection}<div class="panel"><h3>财报</h3><p class="muted">先结束一个季度查看损益数据。</p></div>`;
   return `
     <div class="panel">
       <h3>${state.year} Q${state.quarter} · 上季度损益</h3>
@@ -1096,14 +1117,16 @@ function renderFinance() {
         <div class="fin-card neg"><span>客舱服务</span><b>$${fmt(rep.service)}M</b></div>
         <div class="fin-card neg"><span>安保 / 合规</span><b>$${fmt(rep.safety)}M</b></div>
         <div class="fin-card neg"><span>机队维护</span><b>$${fmt(rep.maintenance)}M</b></div>
+        <div class="fin-card neg"><span>利息支出</span><b>$${fmt(rep.interest || 0)}M</b></div>
         <div class="fin-card big ${netProfit(rep) >= 0 ? 'pos' : 'neg'}"><span>净利润</span><b>$${fmt(netProfit(rep))}M</b></div>
       </div>
       <p class="muted">本季载客 ${Math.round(rep.passengers).toLocaleString()} 人次</p>
     </div>
+    ${debtSection}
   `;
 }
 function netProfit(r) {
-  return r.revenue - r.fuel - r.landing - r.service - r.safety - r.maintenance;
+  return r.revenue - r.fuel - r.landing - r.service - r.safety - r.maintenance - (r.interest || 0);
 }
 
 // ----- 排行 / 情报 (合并) -----
@@ -1123,12 +1146,17 @@ function renderLeaderboard() {
     const np = rep ? netProfit(rep) : 0;
     const npCls = np >= 0 ? 'pos' : 'neg';
     const npLabel = rep ? `<span class="${npCls}">$${fmt(np)}M</span>` : '<span class="muted">—</span>';
+    const debt = s.al.debt || 0;
+    const debtLabel = debt > 0
+      ? `<span class="neg">$${fmt(debt)}M</span>`
+      : '<span class="muted">—</span>';
     return `
       <tr class="leaderboard-row ${s.al.isPlayer ? 'me' : ''} ${isSel ? 'selected' : ''}" data-aid="${s.al.id}">
         <td>${i + 1}</td>
         <td>${airlineChip(s.al)} ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
         <td><b>${Math.round(s.score)}</b></td>
         <td>$${fmt(s.al.cash)}M</td>
+        <td>${debtLabel}</td>
         <td>${npLabel}</td>
         <td>${s.al.aircraft.length}</td>
         <td>${s.seats}</td>
@@ -1148,7 +1176,7 @@ function renderLeaderboard() {
       <h3>航司情报 (${scored.length})</h3>
       <div class="table-wrap"><table class="game-table leaderboard-table">
         <thead><tr>
-          <th>#</th><th>航司</th><th>综合分</th><th>现金</th><th>上季净利</th>
+          <th>#</th><th>航司</th><th>综合分</th><th>现金</th><th>债务</th><th>上季净利</th>
           <th>机队</th><th>座位</th><th>航线</th><th>声望</th><th>主基地</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -1288,6 +1316,7 @@ function attachTabHandlers() {
   if (currentTab === 'routes') attachRouteHandlers();
   else if (currentTab === 'fleet') attachFleetHandlers();
   else if (currentTab === 'cities') attachCitiesHandlers();
+  else if (currentTab === 'finance') attachFinanceHandlers();
   else if (currentTab === 'leaderboard') {
     $$('.leaderboard-row').forEach(tr => {
       tr.addEventListener('click', () => {
@@ -1302,6 +1331,75 @@ function attachTabHandlers() {
       renderTabBody();
     });
   }
+}
+
+function attachFinanceHandlers() {
+  const borrowBtn = $('#borrow-btn');
+  const repayBtn = $('#repay-btn');
+  if (borrowBtn) borrowBtn.addEventListener('click', openBorrowDialog);
+  if (repayBtn) repayBtn.addEventListener('click', openRepayDialog);
+}
+
+function openBorrowDialog() {
+  const p = getPlayer();
+  const limit = creditLimit(p);
+  if (limit <= 0) { toast('当前无可借额度'); return; }
+  openModal({
+    title: '💳 借款',
+    body: `
+      <p>可借额度：<b class="pos">$${fmt(limit)}M</b>　　当前未偿：$${fmt(p.debt || 0)}M</p>
+      <div class="form-row">
+        <label>金额 ($M)</label>
+        <input type="number" id="borrow-amt" min="1" max="${Math.floor(limit)}" value="${Math.min(100, Math.floor(limit))}" />
+      </div>
+      <p class="muted small">利率 ${Math.round(INTEREST_RATE_PER_QUARTER * 100 * 10) / 10}% / 季。每季利息自动从现金扣。</p>
+    `,
+    actions: [
+      { label: '取消', onClick: closeModal },
+      { label: '确认借款', primary: true, onClick: () => {
+        const amt = Math.max(1, parseInt($('#borrow-amt').value, 10) || 0);
+        const res = borrow(p, amt);
+        if (!res.ok) { toast(res.msg); return; }
+        logPlayerAction('borrow', `借款 $${amt}M（未偿 $${res.debt.toFixed(0)}M）`);
+        saveGame();
+        toast(`已借入 $${amt}M`);
+        closeModal();
+        rerender();
+      } },
+    ],
+  });
+}
+
+function openRepayDialog() {
+  const p = getPlayer();
+  const debt = p.debt || 0;
+  if (debt <= 0) { toast('无未偿债务'); return; }
+  const maxRepay = Math.floor(Math.min(debt, Math.max(0, p.cash)));
+  if (maxRepay <= 0) { toast('现金不足'); return; }
+  openModal({
+    title: '💳 还款',
+    body: `
+      <p>当前未偿：<b class="neg">$${fmt(debt)}M</b>　　现金：$${fmt(p.cash)}M</p>
+      <div class="form-row">
+        <label>金额 ($M)</label>
+        <input type="number" id="repay-amt" min="1" max="${maxRepay}" value="${maxRepay}" />
+      </div>
+      <p class="muted small">还款立即扣现金，减少未来季度利息。</p>
+    `,
+    actions: [
+      { label: '取消', onClick: closeModal },
+      { label: '确认还款', primary: true, onClick: () => {
+        const amt = Math.max(1, parseInt($('#repay-amt').value, 10) || 0);
+        const res = repay(p, amt);
+        if (!res.ok) { toast(res.msg); return; }
+        logPlayerAction('repay', `还款 $${res.paid.toFixed(0)}M（未偿 $${res.debt.toFixed(0)}M）`);
+        saveGame();
+        toast(`已还款 $${res.paid.toFixed(0)}M`);
+        closeModal();
+        rerender();
+      } },
+    ],
+  });
 }
 
 // ===== 结束季度 =====
