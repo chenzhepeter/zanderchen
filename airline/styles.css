@@ -296,7 +296,17 @@ input, select { font-size: 14px; }
   display: flex; justify-content: space-between; align-items: center;
   flex: 1; flex-wrap: wrap; gap: 10px;
 }
-.hud-left { display: flex; align-items: baseline; gap: 12px; }
+.hud-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.turn-actions {
+  display: inline-flex; gap: 6px; font-size: 11px; align-items: baseline;
+  margin-left: 4px;
+}
+.turn-actions .ta {
+  padding: 1px 6px; border-radius: 999px;
+  font-family: ui-monospace, monospace; letter-spacing: 0.3px;
+}
+.turn-actions .ta.free { background: #ecfeff; color: var(--primary-dark); }
+.turn-actions .ta.used { background: #f1f5f9; color: var(--muted); }
 .qtag {
   background: var(--primary); color: #fff;
   padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 13px;

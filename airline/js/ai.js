@@ -9,11 +9,12 @@ import {
 import { logAiAction } from './intel.js';
 
 // AI 配置：保守 / 标准 / 进取
-// 全局上调买机/开线上限到 3（更激进）
+// 每季度每家最多 1 开线 / 1 买机 / 1 申请着陆权（玩家也一样）。
+// 让回合节奏更慢、决策更慎重。
 const PROFILE = {
-  conservative: { cashBuffer: 0.45, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 1.05, maxCompetitors: 2 },
-  balanced:     { cashBuffer: 0.30, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 1.00, maxCompetitors: 3 },
-  aggressive:   { cashBuffer: 0.15, maxBuysPerTurn: 3, maxOpensPerTurn: 3, fareMult: 0.92, maxCompetitors: 3 },
+  conservative: { cashBuffer: 0.45, maxBuysPerTurn: 1, maxOpensPerTurn: 1, fareMult: 1.05, maxCompetitors: 2 },
+  balanced:     { cashBuffer: 0.30, maxBuysPerTurn: 1, maxOpensPerTurn: 1, fareMult: 1.00, maxCompetitors: 3 },
+  aggressive:   { cashBuffer: 0.15, maxBuysPerTurn: 1, maxOpensPerTurn: 1, fareMult: 0.92, maxCompetitors: 3 },
 };
 
 export function runAiTurn() {
@@ -150,6 +151,8 @@ function aiActOnce(al, profile) {
   // 5) 买新飞机 + 立刻开新航线
   let bought = 0;
   while (bought < profile.maxBuysPerTurn && canExpand(al, profile)) {
+    // 本季 open 配额已用 → 买了也飞不起来，跳过
+    if ((al.turnActions?.open || 0) >= 1) break;
     const cand = bestNewRoute(al, Infinity, profile);
     if (!cand) break;
     const m = pickModelForDistance(al, cand.dist);

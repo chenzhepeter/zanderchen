@@ -448,10 +448,17 @@ export function rerender() {
 
 function renderHud() {
   const p = getPlayer();
+  const ta = p.turnActions || { open: 0, buy: 0, landing: 0 };
+  const dot = (used) => used >= 1 ? '●' : '○';
   $('#hud').innerHTML = `
     <div class="hud-left">
       <span class="qtag">${state.year} Q${state.quarter}</span>
       <span class="al-name" style="color:${p.color}">${p.nameZh}</span>
+      <span class="turn-actions" title="本季动作：开线 / 买机 / 申请着陆权，每项每季限 1">
+        <span class="ta ${ta.open >= 1 ? 'used' : 'free'}">${dot(ta.open)} 开</span>
+        <span class="ta ${ta.buy >= 1 ? 'used' : 'free'}">${dot(ta.buy)} 买</span>
+        <span class="ta ${ta.landing >= 1 ? 'used' : 'free'}">${dot(ta.landing)} 申</span>
+      </span>
     </div>
     <div class="hud-stats">
       <div><span class="lbl">现金</span><span class="val">$${fmt(p.cash)}M</span></div>
@@ -565,11 +572,12 @@ function renderRoutes() {
     return `<button class="mini r-sort-btn ${active ? 'active' : ''}" data-col="${col}">${label}${arrow}</button>`;
   };
 
+  const openUsed = (p.turnActions?.open || 0) >= 1;
   return `
     <div class="panel">
       <div class="panel-head">
         <h3>航线 (${p.routes.length})</h3>
-        <button id="open-route-btn" class="primary-btn small">+ 开通新航线</button>
+        <button id="open-route-btn" class="primary-btn small" ${openUsed ? 'disabled title="本季已开通 1 条航线（每季限 1 条）"' : ''}>+ 开通新航线</button>
       </div>
       <div class="route-sort-bar">
         <span class="muted small">排序：</span>
@@ -846,11 +854,12 @@ function renderFleet() {
     discountLine = `机队统一为 Boeing 或 Airbus（≥ 2 架）可享 -10% 维护费折扣。`;
   }
 
+  const buyUsed = (p.turnActions?.buy || 0) >= 1;
   return `
     <div class="panel">
       <div class="panel-head">
         <h3>机队 (${p.aircraft.length})</h3>
-        <button id="buy-aircraft-btn" class="primary-btn small">+ 购买飞机</button>
+        <button id="buy-aircraft-btn" class="primary-btn small" ${buyUsed ? 'disabled title="本季已购机 1 架（每季限 1 架）"' : ''}>+ 购买飞机</button>
       </div>
       <div class="table-wrap"><table class="game-table">
         <thead><tr><th>机型</th><th>规格</th><th>机龄</th><th>当前任务</th><th>操作</th></tr></thead>
@@ -969,10 +978,11 @@ function renderCities() {
     return `<th class="sortable" data-col="${col}">${label}${arrow}</th>`;
   };
 
+  const landingUsed = (p.turnActions?.landing || 0) >= 1;
   const trs = rows.map(c => {
     const status = rights.has(c.id) ? '<span class="pos">✓ 已拥有</span>'
       : queued.has(c.id) ? `<span class="warn">审批中</span>`
-        : `<button class="mini apply-btn" data-id="${c.id}">申请</button>`;
+        : `<button class="mini apply-btn" data-id="${c.id}" ${landingUsed ? 'disabled title="本季已申请 1 个着陆权（每季限 1 个）"' : ''}>申请</button>`;
     const slots = cityRouteSlots(c);
     const used = routesAtCity(c.id);
     const slotCls = used >= slots ? 'bad' : used >= slots * 0.8 ? 'warn' : '';
@@ -1109,12 +1119,17 @@ function renderLeaderboard() {
     const isSel = selectedAirlineDetail === s.al.id;
     const hubCity = s.al.hubCity ? CITY_BY_ID[s.al.hubCity] : null;
     const hubLabel = hubCity ? `${hubCity.nameZh} (${hubCity.iata})` : '<span class="muted">—</span>';
+    const rep = state.lastQuarterReports[s.al.id];
+    const np = rep ? netProfit(rep) : 0;
+    const npCls = np >= 0 ? 'pos' : 'neg';
+    const npLabel = rep ? `<span class="${npCls}">$${fmt(np)}M</span>` : '<span class="muted">—</span>';
     return `
       <tr class="leaderboard-row ${s.al.isPlayer ? 'me' : ''} ${isSel ? 'selected' : ''}" data-aid="${s.al.id}">
         <td>${i + 1}</td>
         <td>${airlineChip(s.al)} ${s.al.nameZh}${s.al.isPlayer ? '（你）' : ''}${s.al.bankrupt ? ' <span class="bad">破产</span>' : ''}</td>
         <td><b>${Math.round(s.score)}</b></td>
         <td>$${fmt(s.al.cash)}M</td>
+        <td>${npLabel}</td>
         <td>${s.al.aircraft.length}</td>
         <td>${s.seats}</td>
         <td>${s.al.routes.length}</td>
@@ -1133,7 +1148,7 @@ function renderLeaderboard() {
       <h3>航司情报 (${scored.length})</h3>
       <div class="table-wrap"><table class="game-table leaderboard-table">
         <thead><tr>
-          <th>#</th><th>航司</th><th>综合分</th><th>现金</th>
+          <th>#</th><th>航司</th><th>综合分</th><th>现金</th><th>上季净利</th>
           <th>机队</th><th>座位</th><th>航线</th><th>声望</th><th>主基地</th>
         </tr></thead>
         <tbody>${rows}</tbody>

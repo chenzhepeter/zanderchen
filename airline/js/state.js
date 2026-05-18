@@ -94,9 +94,12 @@ function buildAirlineFromTemplate(tmpl, isPlayer) {
     prestige: tmpl.initialPrestige,
     prestigePerQuarter: 0,
     aircraft,
-    routes,
+    // 过滤掉没有分配到飞机的初始航线（不允许"无飞机"航线挂着占槽位）
+    routes: routes.filter(r => r.aircraftUid !== null),
     landingRights: Array.from(landingRights),
     aiProfile: isPlayer ? null : pickAiProfile(tmpl.id),
+    // 每季度可开 1 条线 / 买 1 架机 / 申请 1 个着陆权
+    turnActions: { open: 0, buy: 0, landing: 0 },
     isPlayer,
     bankrupt: false,
   };

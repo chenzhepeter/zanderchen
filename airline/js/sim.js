@@ -2,6 +2,7 @@ import { state, commitAllRouteSnapshots } from './state.js';
 import { CITY_BY_ID, distanceKm, recomputeCityStates, SLOTS_BY_SIZE } from './data/cities.js';
 import { AIRCRAFT_BY_ID, FLIGHTS_PER_QUARTER } from './data/aircraft.js';
 import { EVENTS } from './data/events.js';
+import { logAiAction } from './intel.js';
 
 // === 初始季度财报种子 ===
 // 在 initNewGame 完成后调用一次，让 2000 Q1 开局就能看到"1999 Q4"的财报数据。
@@ -34,6 +35,10 @@ export function seedInitialQuarterReport() {
 // aiActFn: AI 例行动作 (买机/开线/调价)
 // aiChoiceFn: AI 对带 choice 的事件做选择 (传入 event, 由 ai.js 处理)
 export function advanceQuarter(aiActFn, aiChoiceFn) {
+  // 重置所有航司的本季动作配额（玩家本季已耗、AI 现在准备本季动作）
+  for (const al of state.airlines) {
+    al.turnActions = { open: 0, buy: 0, landing: 0 };
+  }
   const triggered = triggerEventsForQuarter();
   // AI 先消化 choice 事件（玩家由 UI 单独处理）
   if (aiChoiceFn) {
@@ -380,7 +385,12 @@ export function applyEndOfQuarterFinance() {
           const ma = AIRCRAFT_BY_ID[a.modelId], mb = AIRCRAFT_BY_ID[b.modelId];
           return ma.purchasePrice - mb.purchasePrice;
         });
-        sellAircraft(al, sorted[0].uid);
+        const dyingAc = sorted[0];
+        const m = AIRCRAFT_BY_ID[dyingAc.modelId];
+        const res = sellAircraft(al, dyingAc.uid);
+        if (res.ok) {
+          logAiAction(al.id, 'sell', `紧急出售 ${m.name}（回收 $${res.resale.toFixed(0)}M）`);
+        }
       }
       if (al.cash < 0 && al.aircraft.length === 0) al.bankrupt = true;
     }
@@ -429,6 +439,9 @@ export function checkGameOver() {
 
 // === 玩家 / AI 动作 ===
 export function buyAircraft(airline, modelId) {
+  // 每季最多买 1 架
+  if (!airline.turnActions) airline.turnActions = { open: 0, buy: 0, landing: 0 };
+  if (airline.turnActions.buy >= 1) return { ok: false, msg: '本季已购机 1 架（每季限 1 架）' };
   const m = AIRCRAFT_BY_ID[modelId];
   if (!m) return { ok: false, msg: '机型不存在' };
   if (state.year < m.availableFrom || state.year > m.availableUntil) return { ok: false, msg: `该机型 ${m.availableFrom}-${m.availableUntil} 期间方可购买` };
@@ -436,6 +449,7 @@ export function buyAircraft(airline, modelId) {
   airline.cash -= m.purchasePrice;
   const ac = { uid: `u${Date.now()}${Math.floor(Math.random() * 999)}`, modelId, ageQuarters: 0, routeId: null, grounded: false };
   airline.aircraft.push(ac);
+  airline.turnActions.buy += 1;
   return { ok: true, aircraft: ac };
 }
 
@@ -447,10 +461,10 @@ export function sellAircraft(airline, uid) {
   const yrs = ac.ageQuarters / 4;
   const resale = Math.max(m.purchasePrice * 0.15, m.purchasePrice * Math.pow(0.95, yrs) * 0.5);
   airline.cash += resale;
-  // 释放航线的飞机绑定
+  // 卖掉飞机 → 该飞机执飞的航线一起删除（不允许"无飞机"航线挂着占槽位）
   if (ac.routeId) {
-    const r = airline.routes.find(x => x.id === ac.routeId);
-    if (r) r.aircraftUid = null;
+    const ri = airline.routes.findIndex(x => x.id === ac.routeId);
+    if (ri !== -1) airline.routes.splice(ri, 1);
   }
   airline.aircraft.splice(idx, 1);
   return { ok: true, resale };
@@ -458,6 +472,9 @@ export function sellAircraft(airline, uid) {
 
 // 开通新航线: 必须指定一架空闲且航程兼容的飞机；允许同一城市对开多条
 export function openRoute(airline, fromCity, toCity, fare, aircraftUid) {
+  // 每季最多开 1 条新线
+  if (!airline.turnActions) airline.turnActions = { open: 0, buy: 0, landing: 0 };
+  if (airline.turnActions.open >= 1) return { ok: false, msg: '本季已开通 1 条航线（每季限 1 条）' };
   if (fromCity === toCity) return { ok: false, msg: '起降城市不能相同' };
   if (!airline.landingRights.includes(fromCity)) return { ok: false, msg: `没有 ${fromCity} 着陆权` };
   if (!airline.landingRights.includes(toCity))   return { ok: false, msg: `没有 ${toCity} 着陆权` };
@@ -489,6 +506,7 @@ export function openRoute(airline, fromCity, toCity, fare, aircraftUid) {
   };
   airline.routes.push(newRoute);
   ac.routeId = newRoute.id;
+  airline.turnActions.open += 1;
   return { ok: true, route: newRoute };
 }
 
@@ -524,12 +542,18 @@ export function assignAircraftToRoute(airline, routeId, newAircraftUid) {
     ac.routeId = route.id;
     route.aircraftUid = newAircraftUid;
   } else {
-    route.aircraftUid = null;
+    // 卸下飞机 → 航线一起删除（不允许"无飞机"航线挂着占槽位）
+    const ri = airline.routes.findIndex(r => r.id === routeId);
+    if (ri !== -1) airline.routes.splice(ri, 1);
+    return { ok: true, closed: true };
   }
   return { ok: true };
 }
 
 export function applyForLanding(airline, cityId) {
+  // 每季最多申请 1 个着陆权
+  if (!airline.turnActions) airline.turnActions = { open: 0, buy: 0, landing: 0 };
+  if (airline.turnActions.landing >= 1) return { ok: false, msg: '本季已申请 1 个着陆权（每季限 1 个）' };
   if (airline.landingRights.includes(cityId)) return { ok: false, msg: '已拥有' };
   if (state.landingApplications.find(a => a.airlineId === airline.id && a.cityId === cityId)) return { ok: false, msg: '已在排队' };
   const city = CITY_BY_ID[cityId];
@@ -538,6 +562,7 @@ export function applyForLanding(airline, cityId) {
   if (airline.cash < fee) return { ok: false, msg: '申请费不足' };
   airline.cash -= fee;
   state.landingApplications.push({ airlineId: airline.id, cityId, eta });
+  airline.turnActions.landing += 1;
   return { ok: true, eta, fee };
 }
 
