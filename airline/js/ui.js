@@ -1224,7 +1224,8 @@ function renderAirlineDetail(al) {
 // ----- 事件历史 -----
 function renderHistory() {
   if (state.eventLog.length === 0) return `<div class="panel"><h3>事件历史</h3><p class="muted">还没有事件发生。</p></div>`;
-  const items = state.eventLog.map(id => {
+  // 倒序：最新事件在最上面（按 eventLog push 顺序反向，即触发时间晚的先显示）
+  const items = state.eventLog.slice().reverse().map(id => {
     const ev = EVENTS.find(e => e.id === id);
     if (!ev) return '';
     const impacts = describeEvent(ev);
@@ -1239,7 +1240,7 @@ function renderHistory() {
   }).join('');
   return `<div class="panel">
     <h3>已发生事件 (${state.eventLog.length})</h3>
-    <p class="muted small">每条事件下方列出其对游戏的具体机制影响。</p>
+    <p class="muted small">最新事件在最上面。每条事件下方列出其对游戏的具体机制影响。</p>
     <ul class="event-list">${items}</ul>
   </div>`;
 }
