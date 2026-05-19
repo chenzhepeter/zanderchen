@@ -6,10 +6,10 @@ export const STORAGE_KEY = 'airline.save';
 export const SLOT_KEY = (i) => `airline.slot.${i}`;
 export const SAVE_VERSION = 13;
 export const NUM_SLOTS = 5;
-export const APP_VERSION = '2026.5.19.4';
+export const APP_VERSION = '2026.5.19.5';
 
 // 借款机制常量
-export const INTEREST_RATE_PER_QUARTER = 0.02;  // 2% / 季 ≈ 8.2% / 年
+export const INTEREST_RATE_PER_QUARTER = 0.01;  // 1% / 季 ≈ 4.1% / 年
 export const CREDIT_BASELINE = 100;             // $100M 基线
 export const CREDIT_CAP = 500;                  // 总额度上限
 export const DISTRESS_LOSS_THRESHOLD = -10;     // 近 4 季累计亏 < −$10M 触发折扣
