@@ -6,7 +6,10 @@ import { spawnPoint } from './combat.js';
 export function initInput(canvas, state, getView, ui) {
   function pickTower(cx, cy) {
     const rect = canvas.getBoundingClientRect();
-    const v = toVirtual(getView(), cx - rect.left, cy - rect.top);
+    // CSS 像素 → 画布后备缓冲（设备）像素，兼容 iPad 等高 DPR 屏
+    const sx = rect.width ? canvas.width / rect.width : 1;
+    const sy = rect.height ? canvas.height / rect.height : 1;
+    const v = toVirtual(getView(), (cx - rect.left) * sx, (cy - rect.top) * sy);
     let best = null, bestd = 70;
     for (const b of state.buildings) {
       if (b.side !== 'player' || b.kind !== 'tower' || !b.alive) continue;

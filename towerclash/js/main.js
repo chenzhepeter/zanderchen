@@ -22,6 +22,14 @@ function resize() {
   view = makeView(canvas);
 }
 window.addEventListener('resize', resize);
+// iPad：横竖屏切换 / Stage Manager / 分屏 改变尺寸时重算画布
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+// iPad/iOS：禁止双击放大与双指缩放（保留按钮单击不受影响）
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+
 resize();
 
 const ui = initUI(state, restart);
