@@ -63,13 +63,19 @@ export const UNIT_ORDER = ['infantry', 'archer', 'knight', 'mage'];
 export const TOWER = { hp: 1000, dmg: 25, atkCd: 1.0, range: 252, projSpeed: 500 };
 export const KEEP = { hp: 2500, dmg: 35, atkCd: 0.9, range: 276, projSpeed: 520 };
 
-// 威胁等级（仅强化电脑），t 为触发秒数
+// 威胁等级（仅强化电脑），t 为触发秒数。
+// 共 10 级，每 30 秒升一级；regen 1.25→0.80、hpMul/dmgMul 1.00→1.45 线性插值（步长 0.05）；Lv6 起开启双倍出兵。
 export const THREAT = [
-  { lv: 1, t: 0, regen: 1.4, hpMul: 1.0, dmgMul: 1.0, double: false },
-  { lv: 2, t: 45, regen: 1.2, hpMul: 1.0, dmgMul: 1.0, double: false },
-  { lv: 3, t: 90, regen: 1.0, hpMul: 1.1, dmgMul: 1.0, double: false },
-  { lv: 4, t: 135, regen: 0.9, hpMul: 1.2, dmgMul: 1.2, double: false },
-  { lv: 5, t: 180, regen: 0.8, hpMul: 1.25, dmgMul: 1.25, double: true },
+  { lv: 1, t: 0, regen: 1.25, hpMul: 1.00, dmgMul: 1.00, double: false },
+  { lv: 2, t: 30, regen: 1.20, hpMul: 1.05, dmgMul: 1.05, double: false },
+  { lv: 3, t: 60, regen: 1.15, hpMul: 1.10, dmgMul: 1.10, double: false },
+  { lv: 4, t: 90, regen: 1.10, hpMul: 1.15, dmgMul: 1.15, double: false },
+  { lv: 5, t: 120, regen: 1.05, hpMul: 1.20, dmgMul: 1.20, double: false },
+  { lv: 6, t: 150, regen: 1.00, hpMul: 1.25, dmgMul: 1.25, double: true },
+  { lv: 7, t: 180, regen: 0.95, hpMul: 1.30, dmgMul: 1.30, double: true },
+  { lv: 8, t: 210, regen: 0.90, hpMul: 1.35, dmgMul: 1.35, double: true },
+  { lv: 9, t: 240, regen: 0.85, hpMul: 1.40, dmgMul: 1.40, double: true },
+  { lv: 10, t: 270, regen: 0.80, hpMul: 1.45, dmgMul: 1.45, double: true },
 ];
 
 // 骷髅外观名（仅展示用）
