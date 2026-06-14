@@ -43,6 +43,7 @@ html, body {
   background: rgba(0,0,0,0.32); padding: 6px 16px; border-radius: 20px; backdrop-filter: blur(4px); }
 .threat { color: #ffd34d; font-weight: 700; }
 .timer { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+.version { color: rgba(255,255,255,0.4); font-size: 11px; font-variant-numeric: tabular-nums; }
 .legend { font-size: 13px; color: #dde3ee; background: rgba(0,0,0,0.32);
   padding: 6px 12px; border-radius: 20px; backdrop-filter: blur(4px); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }

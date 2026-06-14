@@ -1,5 +1,5 @@
 // HUD：能量条、兵种按钮、路选择、顶栏、结算面板
-import { UNITS, UNIT_ORDER, LANES, ECONOMY } from './data/config.js';
+import { UNITS, UNIT_ORDER, LANES, ECONOMY, APP_VERSION } from './data/config.js';
 import { playerSpawn, canAfford } from './game.js';
 import { spawnPoint } from './combat.js';
 
@@ -53,6 +53,10 @@ export function initUI(state, onRestart) {
   }
 
   el.restart.addEventListener('click', onRestart);
+
+  // 顶栏版本号
+  const verEl = document.getElementById('version');
+  if (verEl) verEl.textContent = 'v' + APP_VERSION;
 
   function trySpawn(key) {
     const btn = btnMap[key];

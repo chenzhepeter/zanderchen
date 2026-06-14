@@ -1,6 +1,9 @@
 // 城楼大战 · Tower Clash —— 全部数值与几何配置
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
+// 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
+export const APP_VERSION = '2026.6.14.4';
+
 export const FIELD = { W: 1280, H: 720 };
 
 // 三条路：上/中/下。y 为路中心线，scale 为 2.5D 纵深缩放（越靠下越大）
