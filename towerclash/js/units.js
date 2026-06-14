@@ -1,0 +1,230 @@
+// 单位：生成、移动、索敌、攻击、兵种技能
+import { UNITS, LANES, SIDES } from './data/config.js';
+import {
+  nextId, dist, damageUnit, damageBuilding, spawnProjectile, addEffect, addFloatText,
+  nearestEnemyUnitInLane, nearestEnemyUnitInRange, enemyStructureOnLane, spawnPoint,
+} from './combat.js';
+
+// 在有效出兵点生成一名单位（mage 例外：驻城楼顶）
+export function makeUnit(state, side, type, lane, opts = {}) {
+  const cfg = UNITS[type];
+  const dir = SIDES[side].dir;
+  const hpMul = side === 'enemy' ? state.threat.hpMul : 1;
+
+  const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === lane && b.alive);
+  let useLane = lane, x, baseY;
+
+  if (type === 'mage') {
+    // 驻塔：站在城楼顶
+    x = tower ? tower.x : SIDES[side].towerX;
+    baseY = (tower ? tower.y : LANES[lane].y) - 36;
+  } else {
+    // 城楼存活→从城楼出；三城楼全毁→从主楼出（归中路）
+    const sp = spawnPoint(state, side, lane);
+    useLane = sp ? sp.lane : lane;
+    const startX = sp ? sp.x : SIDES[side].towerX;
+    x = startX + dir * (28 + (opts.offset || 0));
+    baseY = LANES[useLane].y + (opts.yo || 0);
+  }
+  const y = baseY;
+
+  const u = {
+    id: nextId(), side, type, cfg, lane: useLane, dir,
+    x, y, baseY,
+    hp: cfg.hp * hpMul, maxHp: cfg.hp * hpMul,
+    dmgMul: side === 'enemy' ? state.threat.dmgMul : 1,
+    state: 'march', target: null,
+    atkTimer: 0, healTimer: cfg.heal ? cfg.heal.cd : 0,
+    // 动画
+    animTime: Math.random() * 6, walkPhase: 0, attackAnim: 0, hitFlash: 0, deathT: 0,
+    // 骑士冲锋
+    marchTime: 0, charging: false, chargeUsed: false,
+    // 弓兵穿透
+    shotCount: 0,
+    // 法师驻塔
+    tower: type === 'mage' ? tower : null,
+  };
+  if (type === 'mage' && tower) tower.mage = u;
+  return u;
+}
+
+export function spawnSquad(state, side, type, lane) {
+  const cfg = UNITS[type];
+  const out = [];
+  const n = cfg.squad || 1;
+  for (let i = 0; i < n; i++) {
+    const yo = n > 1 ? (i - (n - 1) / 2) * 26 : (Math.random() * 16 - 8);
+    const u = makeUnit(state, side, type, lane, { offset: i * 14, yo });
+    state.units.push(u);
+    out.push(u);
+  }
+  addEffect(state, { type: 'spawn', x: out[0].x, y: out[0].baseY, life: 0.5 });
+  return out;
+}
+
+export function updateUnits(state, dt) {
+  for (const u of state.units) {
+    if (u.state === 'dead') { u.deathT += dt; continue; }
+    u.animTime += dt;
+    if (u.hitFlash > 0) u.hitFlash = Math.max(0, u.hitFlash - dt * 4);
+    if (u.attackAnim > 0) u.attackAnim = Math.max(0, u.attackAnim - dt * 4);
+    u.atkTimer = Math.max(0, u.atkTimer - dt);
+
+    if (u.type === 'mage') { updateMage(state, u, dt); continue; }
+
+    const ranged = u.cfg.kind === 'ranged';
+    // 选目标：远程兵（弓兵）锁定最近威胁，可跨三路；近战兵守本路
+    let target = ranged
+      ? nearestEnemyUnitInRange(state, u.side, u.x, u.y, u.cfg.aggro)
+      : nearestEnemyUnitInLane(state, u, u.cfg.aggro);
+    let targetIsBuilding = false;
+    if (!target) {
+      target = enemyStructureOnLane(state, u.side, u.lane);
+      targetIsBuilding = !!target;
+    }
+    u.target = target;
+
+    if (!target) { marchForward(state, u, dt); continue; }
+
+    const tx = target.x, ty = target.y;
+    const reach = u.cfg.range + (u.cfg.radius || 12) + (targetIsBuilding ? 26 : (target.cfg ? target.cfg.radius : 0));
+    // 需要向目标真实位置聚拢的情形：远程兵打（跨路）单位，或任何兵攻打建筑
+    //（主楼居中且在城楼后方 → 上/下路单位需向内走到主楼跟前，而非沿本路边隔空攻击）
+    const converge = ranged || targetIsBuilding;
+    const gap = converge ? dist(u.x, u.y, tx, ty) : Math.abs(tx - u.x);
+
+    if (gap > reach) {
+      u.state = 'march';
+      // converge 时向目标真实 (x,y) 靠拢；否则沿本路推进守线
+      moveToward(state, u, tx, ty, dt, !converge);
+    } else {
+      u.state = 'fight';
+      u.walkPhase = 0;
+      u.facing = Math.sign(tx - u.x) || u.dir;
+      if (u.atkTimer <= 0) doAttack(state, u, target, targetIsBuilding);
+    }
+  }
+}
+
+function marchForward(state, u, dt) {
+  u.state = 'march';
+  const goalX = u.dir > 0 ? 2000 : -800;
+  moveToward(state, u, goalX, u.baseY, dt);
+}
+
+function moveToward(state, u, tx, ty, dt, snapLane = true) {
+  const dirX = Math.sign(tx - u.x) || u.dir;
+  u.facing = dirX;
+  // 简单避让：靠太近的同侧前方单位减速
+  let speed = u.cfg.speed;
+  for (const o of state.units) {
+    if (o === u || o.state === 'dead' || o.side !== u.side || o.lane !== u.lane) continue;
+    if (Math.sign(o.x - u.x) === dirX && Math.abs(o.x - u.x) < (u.cfg.radius + o.cfg.radius)) {
+      speed *= 0.35; break;
+    }
+  }
+  u.x += dirX * speed * dt;
+  if (snapLane) {
+    // 回到本路中心线
+    u.y += (u.baseY - u.y) * Math.min(1, dt * 4);
+  } else {
+    // 远程兵向跨路目标纵向靠近
+    const dy = ty - u.y;
+    u.y += Math.sign(dy) * Math.min(Math.abs(dy), speed * dt * 0.7);
+  }
+  u.walkPhase += speed * dt * 0.05;
+  // 骑士冲锋蓄力
+  if (u.cfg.charge) {
+    u.marchTime += dt;
+    if (u.marchTime >= u.cfg.charge.time && !u.charging && !u.chargeUsed) {
+      u.charging = true;
+      addFloatText(state, u.x, u.y - 30, '冲锋!', '#ffd34d');
+    }
+  }
+}
+
+function doAttack(state, u, target, isBuilding) {
+  u.atkTimer = u.cfg.atkCd;
+  u.attackAnim = 1;
+  let dmg = u.cfg.dmg * u.dmgMul;
+
+  // 骑士冲锋：首次撞击双倍 + 击退
+  if (u.cfg.charge && u.charging && !u.chargeUsed) {
+    dmg *= u.cfg.charge.mult;
+    u.charging = false;
+    u.chargeUsed = true;
+    if (!isBuilding && target.state !== 'dead') {
+      target.x += u.dir * u.cfg.charge.knockback;
+      addEffect(state, { type: 'hit', x: target.x, y: target.y - 14, life: 0.3, big: true });
+    }
+    addFloatText(state, target.x, target.y - 34, '撞击!', '#ffd34d');
+  }
+  // 冲锋一旦停下交战即重置蓄力计时
+  if (u.cfg.charge) u.marchTime = 0;
+
+  if (u.cfg.kind === 'ranged') {
+    fireArrow(state, u, target, dmg, isBuilding);
+  } else {
+    // 近战瞬时
+    if (isBuilding) damageBuilding(state, target, dmg);
+    else damageUnit(state, target, dmg, { kind: 'melee', attacker: u });
+  }
+}
+
+function fireArrow(state, u, target, dmg, isBuilding) {
+  u.shotCount++;
+  const pierce = u.cfg.pierceEvery && (u.shotCount % u.cfg.pierceEvery === 0);
+  if (pierce && !isBuilding) {
+    // 穿透箭：朝目标方向直线飞行（可跨路），贯穿沿途多个敌人
+    const dx = target.x - u.x, dy = (target.y - 14) - (u.y - 14);
+    const len = Math.hypot(dx, dy) || 1;
+    spawnProjectile(state, {
+      kind: 'arrow', side: u.side, x: u.x, y: u.y - 14,
+      vx: dx / len * u.cfg.projSpeed, vy: dy / len * u.cfg.projSpeed, dmg, pierce: true,
+      hitSet: new Set(), life: 1.4, lane: u.lane,
+    });
+    addFloatText(state, u.x, u.y - 30, '穿透!', '#aef');
+  } else {
+    spawnProjectile(state, {
+      kind: 'arrow', side: u.side, x: u.x, y: u.y - 14,
+      target, isBuilding, speed: u.cfg.projSpeed, dmg, pierce: false, lane: u.lane,
+    });
+  }
+}
+
+function updateMage(state, u, dt) {
+  // 城楼倒了法师已在 damageBuilding 里阵亡，这里兜底
+  if (u.tower && !u.tower.alive) { u.state = 'dead'; u.deathT = 0; return; }
+  // 治疗光环
+  u.healTimer -= dt;
+  if (u.healTimer <= 0) {
+    u.healTimer = u.cfg.heal.cd;
+    let healed = false;
+    for (const o of state.units) {
+      if (o.state === 'dead' || o.side !== u.side || o === u) continue;
+      if (dist(u.x, u.y, o.x, o.y) <= u.cfg.heal.range && o.hp < o.maxHp) {
+        o.hp = Math.min(o.maxHp, o.hp + u.cfg.heal.amount);
+        addFloatText(state, o.x, o.y - 30, '+' + u.cfg.heal.amount, '#7CFF8A');
+        healed = true;
+      }
+    }
+    if (healed) addEffect(state, { type: 'heal', x: u.x, y: u.y, life: 0.6, r: u.cfg.heal.range });
+  }
+  // 法球：锁定射程内最近威胁（可跨三路）
+  const enemyU = nearestEnemyUnitInRange(state, u.side, u.x, u.y, u.cfg.range);
+  if (enemyU && u.atkTimer <= 0) {
+    u.atkTimer = u.cfg.atkCd;
+    u.attackAnim = 1;
+    u.facing = u.dir;
+    spawnProjectile(state, {
+      kind: 'orb', side: u.side, x: u.x, y: u.y - 8,
+      tx: enemyU.x, ty: enemyU.y, speed: u.cfg.projSpeed,
+      dmg: u.cfg.dmg * u.dmgMul, aoe: u.cfg.aoe, lane: u.lane,
+    });
+  }
+}
+
+// 清理已淡出的尸体
+export function cleanupUnits(state) {
+  state.units = state.units.filter(u => !(u.state === 'dead' && u.deathT > 1.0));
+}
