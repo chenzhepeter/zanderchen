@@ -13,15 +13,11 @@ const PENDING_HINT = {
 function createHud(state, side, container) {
   container.innerHTML = `
     <div class="hud-hint"></div>
-    <div class="lane-col">
-      <div class="lane-label">出兵路</div>
+    <div class="hud-energy"><div class="pips"></div><div class="energy-num">⚡<span class="energy-val">5</span></div></div>
+    <div class="hud-ctrl">
       <div class="lane-select"></div>
-    </div>
-    <div class="energy">
-      <div class="pips"></div>
-      <div class="energy-num">⚡<span class="energy-val">5</span></div>
-    </div>
-    <div class="unit-buttons"></div>`;
+      <div class="unit-buttons"></div>
+    </div>`;
 
   const hintEl = container.querySelector('.hud-hint');
   const laneSel = container.querySelector('.lane-select');
@@ -141,7 +137,7 @@ export function initUI(state, handlers) {
     menu: document.getElementById('menu'),
     pve: document.getElementById('mode-pve'),
     pvp: document.getElementById('mode-pvp'),
-    hudTop: document.getElementById('hud-top'),
+    hudRight: document.getElementById('hud-right'),
   };
   const verEl = document.getElementById('version');
   if (verEl) verEl.textContent = 'v' + APP_VERSION;
@@ -151,8 +147,8 @@ export function initUI(state, handlers) {
   el.restart.addEventListener('click', () => handlers.onRestart());
   el.menuBtn.addEventListener('click', () => handlers.onMenu());
 
-  const hudBottom = createHud(state, 'player', document.getElementById('hud-bottom'));
-  const hudTop = createHud(state, 'enemy', document.getElementById('hud-top'));
+  const hudLeft = createHud(state, 'player', document.getElementById('hud-left'));
+  const hudRight = createHud(state, 'enemy', document.getElementById('hud-right'));
 
   let prevLv = state.threat.lv;
   function showToast(msg) {
@@ -194,17 +190,17 @@ export function initUI(state, handlers) {
   }
 
   function update() {
-    hudBottom.update();
-    if (state.mode === 'pvp') hudTop.update();
+    hudLeft.update();
+    if (state.mode === 'pvp') hudRight.update();
     updateShared();
   }
 
   function applyMode() {
-    el.hudTop.style.display = state.mode === 'pvp' ? '' : 'none';
+    el.hudRight.style.display = state.mode === 'pvp' ? '' : 'none';
   }
 
   function showMenu(show) { el.menu.classList.toggle('hidden', !show); }
   function hideResult() { el.result.classList.add('hidden'); prevLv = state.threat.lv; }
 
-  return { update, applyMode, showMenu, hideResult, trySpawnPlayer: hudBottom.trySpawn };
+  return { update, applyMode, showMenu, hideResult, trySpawnPlayer: hudLeft.trySpawn };
 }

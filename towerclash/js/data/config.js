@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.18.4';
+export const APP_VERSION = '2026.6.18.5';
 
 export const FIELD = { W: 1280, H: 720 };
 

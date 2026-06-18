@@ -86,8 +86,8 @@ export function spawnSpecial(state, side, type) {
   if (!keep) return null;
   const dir = SIDES[side].dir;
   const fixed = type === 'sniper'
-    ? { x: keep.x, baseY: keep.y - 118, lane: 1 }
-    : { x: keep.x + dir * 50, baseY: keep.y + 14, lane: 1 };
+    ? { x: keep.x, baseY: keep.y - 118, lane: 1 }            // 主楼顶
+    : { x: keep.x + dir * 74, baseY: keep.y + 30, lane: 1 }; // 主楼旁（错开，不遮挡）
   const u = makeUnit(state, side, type, 1, { fixed });
   state.units.push(u);
   addEffect(state, { type: 'spawn', x: u.x, y: u.baseY, life: 0.5 });
