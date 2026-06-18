@@ -107,6 +107,18 @@ html, body {
   .unit-btn:hover { transform: none; border-color: rgba(255,255,255,0.18); }
 }
 .unit-btn.flash { border-color: #4fd06a; box-shadow: 0 0 14px rgba(79,208,106,0.7); }
+/* 未解锁兵种：灰显 + 锁定遮罩 */
+.ub-lock {
+  position: absolute; inset: 0;
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border-radius: 12px;
+  background: rgba(12,14,22,0.82); color: #cfd6e2;
+  font-size: 13px; font-weight: 700; line-height: 1.2; text-align: center;
+}
+.unit-btn.locked { filter: grayscale(0.7); cursor: not-allowed; }
+.unit-btn.locked .ub-lock { display: flex; }
+.unit-btn.locked:hover { transform: none; border-color: rgba(255,255,255,0.18); }
+.unit-btn.locked:hover .ub-tip { opacity: 0; }
 .unit-btn.shake { animation: shake .25s; }
 @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
 
@@ -135,6 +147,24 @@ html, body {
 .hint {
   position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
   font-size: 11px; color: rgba(255,255,255,0.35); white-space: nowrap; pointer-events: none;
+}
+
+/* 解锁提示 toast */
+.toast {
+  position: absolute; top: 16%; left: 50%; transform: translateX(-50%) translateY(-8px);
+  background: linear-gradient(to bottom, rgba(255,221,77,0.96), rgba(255,180,60,0.96));
+  color: #2a2410; font-weight: 700; font-size: 18px;
+  padding: 10px 22px; border-radius: 999px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  opacity: 0; pointer-events: none; z-index: 9; white-space: nowrap;
+}
+.toast.show { animation: toastPop 1.9s ease-out forwards; }
+@keyframes toastPop {
+  0% { opacity: 0; transform: translateX(-50%) translateY(4px) scale(0.9); }
+  12% { opacity: 1; transform: translateX(-50%) translateY(-8px) scale(1.05); }
+  20% { transform: translateX(-50%) translateY(-8px) scale(1); }
+  80% { opacity: 1; transform: translateX(-50%) translateY(-8px) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-16px) scale(1); }
 }
 
 @media (max-width: 720px) {

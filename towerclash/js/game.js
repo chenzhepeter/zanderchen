@@ -31,6 +31,7 @@ export function createGame() {
 export function playerSpawn(state, type) {
   if (state.over) return false;
   const cfg = UNITS[type];
+  if (state.threat.lv < cfg.unlock) return false; // 该兵种尚未解锁（按威胁等级逐级解锁）
   const e = state.energy.player;
   if (e.value < cfg.cost) return false;
   const lane = state.selectedLane;

@@ -35,7 +35,8 @@ export function initUI(state, onRestart) {
       <span class="ub-icon">${u.icon}</span>
       <span class="ub-name">${u.name}</span>
       <span class="ub-cost">⚡${u.cost}</span>
-      <span class="ub-tip">${u.skill}</span>`;
+      <span class="ub-tip">${u.skill}</span>
+      <span class="ub-lock">🔒<br>Lv.${u.unlock}</span>`;
     btn.addEventListener('click', () => trySpawn(key));
     el.buttons.appendChild(btn);
     btnMap[key] = btn;
@@ -57,6 +58,17 @@ export function initUI(state, onRestart) {
   // 顶栏版本号
   const verEl = document.getElementById('version');
   if (verEl) verEl.textContent = 'v' + APP_VERSION;
+
+  // 解锁提示（toast）
+  const toastEl = document.getElementById('toast');
+  function showToast(msg) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.remove('show');
+    void toastEl.offsetWidth; // 重启动画
+    toastEl.classList.add('show');
+  }
+  let prevLv = state.threat.lv; // 跟踪升级以触发解锁提示
 
   function trySpawn(key) {
     const btn = btnMap[key];
@@ -86,6 +98,7 @@ export function initUI(state, onRestart) {
     const tower = state.buildings.find(b => b.side === 'player' && b.kind === 'tower' && b.lane === state.selectedLane && b.alive);
     const sp = spawnPoint(state, 'player', state.selectedLane);
     for (const key of UNIT_ORDER) {
+      const locked = state.threat.lv < UNITS[key].unlock; // 尚未解锁
       let blocked;
       if (key === 'mage') {
         // 法师需存活城楼且未被占用，不能从主楼出
@@ -93,8 +106,17 @@ export function initUI(state, onRestart) {
       } else {
         blocked = !sp; // 该路城楼被毁且其它路尚存城楼 → 不可出兵
       }
-      btnMap[key].classList.toggle('disabled', !canAfford(state, key) || blocked);
+      btnMap[key].classList.toggle('locked', locked);
+      // 未解锁时只显示锁定遮罩（不叠加灰显）；已解锁则按能量/出兵点判断置灰
+      btnMap[key].classList.toggle('disabled', !locked && (!canAfford(state, key) || blocked));
     }
+    // 升级解锁提示
+    if (state.threat.lv > prevLv) {
+      for (const key of UNIT_ORDER) {
+        if (UNITS[key].unlock === state.threat.lv) showToast('🔓 解锁新兵种：' + UNITS[key].name + '！');
+      }
+    }
+    prevLv = state.threat.lv;
     // 路按钮：高亮当前路，置灰不可出兵的路
     laneBtns.forEach((b, i) => {
       b.classList.toggle('active', i === state.selectedLane);
