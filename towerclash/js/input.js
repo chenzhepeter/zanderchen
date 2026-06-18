@@ -14,13 +14,15 @@ export function initInput(canvas, state, getView, ui) {
   }
 
   function pickTower(side, v) {
-    let best = null, bestd = 70;
+    let best = null, bestd = 80;
     for (const b of state.buildings) {
-      if (b.side !== side || b.kind !== 'tower' || !b.alive) continue;
+      if (b.side !== side || !b.alive) continue;
+      if (b.kind !== 'tower' && b.kind !== 'keep') continue;
       const d = Math.hypot(b.x - v.x, (b.y - 30) - v.y);
       if (d < bestd) { bestd = d; best = b; }
     }
-    if (best) { state.selected[side] = best.lane; return; }
+    // 点城楼→该路；点主楼→中路（中路城楼没了可从主楼出兵）
+    if (best) { state.selected[side] = best.kind === 'keep' ? 1 : best.lane; return; }
     // 城楼被毁时按 y 就近选一条仍可出兵的路
     let lane = -1, ld = Infinity;
     for (const l of LANES) {

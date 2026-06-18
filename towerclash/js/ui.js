@@ -13,12 +13,10 @@ function createHud(state, side, container) {
     <div class="hud-hint"></div>
     <div class="hud-energy"><div class="pips"></div><div class="energy-num">⚡<span class="energy-val">5</span></div></div>
     <div class="hud-ctrl">
-      <div class="lane-select"></div>
       <div class="unit-buttons"></div>
     </div>`;
 
   const hintEl = container.querySelector('.hud-hint');
-  const laneSel = container.querySelector('.lane-select');
   const pipsEl = container.querySelector('.pips');
   const energyVal = container.querySelector('.energy-val');
   const btnWrap = container.querySelector('.unit-buttons');
@@ -45,16 +43,6 @@ function createHud(state, side, container) {
     btn.addEventListener('click', () => trySpawn(key));
     btnWrap.appendChild(btn);
     btnMap[key] = btn;
-  }
-
-  const laneBtns = [];
-  for (const lane of LANES) {
-    const b = document.createElement('button');
-    b.className = 'lane-btn';
-    b.textContent = lane.name + '路';
-    b.addEventListener('click', () => { if (spawnPoint(state, side, lane.id)) state.selected[side] = lane.id; });
-    laneSel.appendChild(b);
-    laneBtns.push(b);
   }
 
   function trySpawn(key) {
@@ -106,11 +94,6 @@ function createHud(state, side, container) {
       const cdEl = btn.querySelector('.ub-cd');
       if (cdEl) { cdEl.textContent = cdText; cdEl.style.display = cdText ? 'flex' : 'none'; }
     }
-
-    laneBtns.forEach((b, i) => {
-      b.classList.toggle('active', i === state.selected[side]);
-      b.classList.toggle('disabled', !spawnPoint(state, side, i));
-    });
 
     const a = state.pending[side];
     const hint = a ? PENDING_HINT[a.type] : '';

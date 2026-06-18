@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.18.6';
+export const APP_VERSION = '2026.6.18.7';
 
 export const FIELD = { W: 1280, H: 720 };
 
@@ -62,15 +62,15 @@ export const UNITS = {
   dog: {
     key: 'dog', name: '狗', icon: '🐕', cost: 2, unlock: 1,
     hp: 90, dmg: 8, atkCd: 0.8, range: 30, speed: 132, aggro: 200,
-    squad: 1, kind: 'melee', radius: 11,
+    squad: 1, kind: 'melee', radius: 11, trample: true, // 灵活穿插，不被友军阻挡
     slow: { factor: 0.45, dur: 2.5 }, // 撕咬：命中后大幅减速
-    skill: '撕咬：速度快、伤害低，命中后让敌人减速数秒',
+    skill: '撕咬：速度快、伤害低，命中减速敌人数秒；可穿过友军不追尾',
   },
   block: {
     key: 'block', name: '路障', icon: '🧱', cost: 2, unlock: 1,
-    hp: 700, dmg: 0, atkCd: 0, range: 0, speed: 0, aggro: 0,
+    hp: 770, dmg: 0, atkCd: 0, range: 0, speed: 0, aggro: 0,
     squad: 1, kind: 'block', radius: 19, place: 'ownRoad',
-    skill: '部署在自家半场道路，阻挡双方前进，血厚需被摧毁',
+    skill: '罗马拒马：部署自家半场道路，阻挡双方前进；血厚，弓箭难破（需近战/攻坚）',
   },
   cannon: {
     key: 'cannon', name: '炮手', icon: '💣', cost: 5, unlock: 5,
@@ -81,14 +81,14 @@ export const UNITS = {
   sniper: {
     key: 'sniper', name: '狙击手', icon: '🎯', cost: 6, unlock: 6,
     hp: 70, dmg: 9999, kind: 'sniper', radius: 13, place: 'keepTop',
-    ability: { cd: 5 },
-    skill: '驻主楼顶：每5秒点击锁定一名地面敌人秒杀（无法狙杀城楼上的人）',
+    ability: { cd: 10 }, knightLeave: 0.3, // 骑士被打到 30% 血
+    skill: '驻主楼顶：每10秒自动狙杀闯入己方半场最强的敌人；秒杀除骑士外所有单位，骑士被打到残血（不打城楼上的人）',
   },
   catapult: {
     key: 'catapult', name: '投石机', icon: '🪨', cost: 7, unlock: 7,
     hp: 170, dmg: 130, kind: 'catapult', radius: 18, place: 'keepSide',
-    aoe: 88, ability: { cd: 5 },
-    skill: '建于主楼旁：每5秒点击轰炸任意地面，范围高伤（不能砸城楼）',
+    aoe: 88, ability: { cd: 10 },
+    skill: '建于主楼旁：每10秒自动轰炸最密集的敌群，范围高伤（不砸城楼）',
   },
 };
 export const UNIT_ORDER = ['infantry', 'dog', 'block', 'archer', 'knight', 'mage', 'cannon', 'sniper', 'catapult'];
@@ -112,6 +112,10 @@ export const THREAT = [
   { lv: 9, t: 160, regen: 0.78, hpMul: 1.50, dmgMul: 1.50, double: true },
   { lv: 10, t: 180, regen: 0.76, hpMul: 1.52, dmgMul: 1.52, double: true },
 ];
+
+// 玩家 vs 电脑：NPC 威胁整体下调 ~10%（仅作用于 AI 侧；不影响 PvP，也不改解锁节奏）
+//  stat：AI 单位血量/攻击倍率再 ×0.9；regen：AI 能量回复间隔 ×1.1（慢 10%）
+export const NPC_SCALE = { stat: 0.9, regen: 1.1 };
 
 // 骷髅外观名（仅展示用）
 export const SKELE_NAME = { infantry: '骷髅兵', archer: '骷髅弓手', knight: '骷髅骑士', mage: '巫妖' };

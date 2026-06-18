@@ -35,6 +35,8 @@ export function damageUnit(state, u, amount, opts = {}) {
   if (opts.kind && u.cfg && u.cfg.resist && u.cfg.resist[opts.kind]) {
     amt *= (1 - u.cfg.resist[opts.kind]);
   }
+  // 路障(拒马)抗箭：弓箭手对其伤害 −50%
+  if (u.type === 'block' && opts.kind === 'arrow') amt *= 0.5;
   // 步兵结阵减伤
   if (u.type === 'infantry') {
     const f = UNITS.infantry.formation;
@@ -145,11 +147,15 @@ export function nearestEnemyUnitInRange(state, side, x, y, range) {
 export function spawnPoint(state, side, lane) {
   const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === lane && b.alive);
   if (tower) return { x: tower.x, lane, tower };
+  const keep = state.buildings.find(b => b.side === side && b.kind === 'keep' && b.alive);
+  // 中路城楼被毁 → 从主楼出兵（中路）
+  if (lane === 1 && keep) return { x: keep.x, lane: 1, fromKeep: true };
+  // 其它路：仍有城楼存活则该路不可出兵
   const anyTower = state.buildings.some(b => b.side === side && b.kind === 'tower' && b.alive);
   if (anyTower) return null;
-  const keep = state.buildings.find(b => b.side === side && b.kind === 'keep' && b.alive);
-  if (!keep) return null;
-  return { x: keep.x, lane: 1, fromKeep: true };
+  // 三城楼全毁 → 主楼（中路）
+  if (keep) return { x: keep.x, lane: 1, fromKeep: true };
+  return null;
 }
 
 // 该路上敌方的下一个攻击建筑（先城楼后主楼）

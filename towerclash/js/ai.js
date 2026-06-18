@@ -1,5 +1,5 @@
 // 电脑骷髅 AI：随能量自动出兵 + 威胁等级渐进强化
-import { UNITS, UNIT_ORDER, LANES, THREAT, ECONOMY } from './data/config.js';
+import { UNITS, UNIT_ORDER, LANES, THREAT, ECONOMY, NPC_SCALE } from './data/config.js';
 import { spawnSquad } from './units.js';
 import { spawnPoint } from './combat.js';
 
@@ -16,7 +16,7 @@ export function updateAI(state, dt) {
   const e = state.energy.enemy;
   // 电脑能量回复（按威胁等级）
   e.acc += dt;
-  const regen = state.threat.regen;
+  const regen = state.threat.regen * NPC_SCALE.regen; // NPC 能量回复慢 10%
   while (e.acc >= regen && e.value < ECONOMY.max) {
     e.acc -= regen;
     e.value = Math.min(ECONOMY.max, e.value + 1);

@@ -1,9 +1,9 @@
 // 单位：生成、移动、索敌、攻击、兵种技能
-import { UNITS, LANES, SIDES } from './data/config.js';
+import { UNITS, LANES, SIDES, FIELD, NPC_SCALE } from './data/config.js';
 import {
   nextId, dist, damageUnit, damageBuilding, spawnProjectile, addEffect, addFloatText,
   nearestEnemyUnitInLane, nearestEnemyUnitInRange, enemyStructureOnLane, spawnPoint,
-  mostExpensiveEnemy, bestBombCenter,
+  bestBombCenter,
 } from './combat.js';
 
 const TOWER_MOUNTED = ['mage', 'sniper', 'catapult']; // 城楼/主楼上的人，狙击/投石不打
@@ -12,8 +12,8 @@ const TOWER_MOUNTED = ['mage', 'sniper', 'catapult']; // 城楼/主楼上的人�
 export function makeUnit(state, side, type, lane, opts = {}) {
   const cfg = UNITS[type];
   const dir = SIDES[side].dir;
-  const ai = !!(state.controllers && state.controllers[side] === 'ai'); // 仅 AI 侧吃威胁加成
-  const hpMul = ai ? state.threat.hpMul : 1;
+  const ai = !!(state.controllers && state.controllers[side] === 'ai'); // 仅 AI 侧吃威胁加成（再 ×0.9 下调）
+  const hpMul = ai ? state.threat.hpMul * NPC_SCALE.stat : 1;
 
   const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === lane && b.alive);
   let useLane = lane, x, baseY;
@@ -41,7 +41,7 @@ export function makeUnit(state, side, type, lane, opts = {}) {
     id: nextId(), side, type, cfg, lane: useLane, dir,
     x, y, baseY,
     hp: cfg.hp * hpMul, maxHp: cfg.hp * hpMul,
-    dmgMul: ai ? state.threat.dmgMul : 1,
+    dmgMul: ai ? state.threat.dmgMul * NPC_SCALE.stat : 1,
     state: 'march', target: null,
     atkTimer: 0, healTimer: cfg.heal ? cfg.heal.cd : 0,
     // 动画
@@ -298,10 +298,22 @@ function updateSpecial(state, u, dt) {
   u.abilityTimer = Math.max(0, u.abilityTimer - dt);
   if (u.abilityTimer > 0) return;
   if (u.type === 'sniper') {
-    // 狙杀最贵的敌方地面单位（秒杀），不打城楼/主楼上的人
-    const t = mostExpensiveEnemy(state, u.side, TOWER_MOUNTED);
+    // 锁定闯入己方半场、最强(成本最高)的敌人；骑士打到 30% 血，其余秒杀。不打城楼上的人
+    const mid = FIELD.W / 2;
+    const kLeave = u.cfg.knightLeave || 0.3;
+    let t = null, bestCost = -1;
+    for (const o of state.units) {
+      if (o.state === 'dead' || o.side === u.side) continue;
+      if (TOWER_MOUNTED.includes(o.type)) continue;
+      const inOwn = u.side === 'player' ? o.x < mid : o.x > mid;
+      if (!inOwn) continue;
+      if (o.type === 'knight' && o.hp <= o.maxHp * kLeave) continue; // 已残骑士不再浪费子弹
+      const cost = (UNITS[o.type] && UNITS[o.type].cost) || 0;
+      if (cost > bestCost || (cost === bestCost && (!t || o.hp > t.hp))) { bestCost = cost; t = o; }
+    }
     if (!t) return;
-    t.hp = 0; t.state = 'dead'; t.deathT = 0;
+    if (t.type === 'knight') { t.hp = Math.min(t.hp, t.maxHp * kLeave); t.hitFlash = 1; }
+    else { t.hp = 0; t.state = 'dead'; t.deathT = 0; }
     u.abilityTimer = u.cfg.ability.cd; u.attackAnim = 1; u.facing = Math.sign(t.x - u.x) || u.dir;
     addEffect(state, { type: 'snipe', x: u.x, y: u.y - 12, tx: t.x, ty: t.y - 12, life: 0.25 });
     addEffect(state, { type: 'hit', x: t.x, y: t.y - 12, life: 0.35, big: true });
