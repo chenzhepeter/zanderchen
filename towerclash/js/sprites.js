@@ -27,9 +27,11 @@ function roundRect(ctx, x, y, w, h, r) {
 const OUTLINE = '#241f33';
 
 // ============ 单位 ============
+const SIZE_MUL = { knight: 1.22, mage: 1.02, dog: 0.92, block: 1.05, cannon: 1.08, sniper: 1.0, catapult: 1.16 };
+
 export function drawUnit(ctx, u) {
   const lane = LANES[u.lane];
-  const sizeMul = u.type === 'knight' ? 1.22 : u.type === 'mage' ? 1.02 : 1.0;
+  const sizeMul = SIZE_MUL[u.type] || 1.0;
   const sc = lane.scale * sizeMul;
   const pal = palette(u.side, u.type);
   const dead = u.state === 'dead';
@@ -69,8 +71,15 @@ export function drawUnit(ctx, u) {
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
 
-  if (u.type === 'mage') drawMage(ctx, u, pal);
-  else drawWarrior(ctx, u, pal);
+  switch (u.type) {
+    case 'mage': drawMage(ctx, u, pal); break;
+    case 'dog': drawDog(ctx, u, pal); break;
+    case 'block': drawBlock(ctx, u, pal); break;
+    case 'cannon': drawCannon(ctx, u, pal); break;
+    case 'sniper': drawSniper(ctx, u, pal); break;
+    case 'catapult': drawCatapult(ctx, u, pal); break;
+    default: drawWarrior(ctx, u, pal);
+  }
 
   // 受击闪白
   if (u.hitFlash > 0) {
@@ -245,6 +254,85 @@ function drawMage(ctx, u, pal) {
   grad.addColorStop(0, '#fff'); grad.addColorStop(0.5, glow); grad.addColorStop(1, 'rgba(150,120,255,0)');
   ctx.fillStyle = grad;
   ctx.beginPath(); ctx.arc(0, -18, r + 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function drawDog(ctx, u, pal) {
+  const skel = pal.skel;
+  const body = skel ? pal.bone : (u.side === 'player' ? '#9c6b3f' : '#8a7f9c');
+  const sw = u.state === 'march' ? Math.sin(u.walkPhase) * 4 : 0;
+  ctx.lineWidth = 2; ctx.strokeStyle = OUTLINE; ctx.fillStyle = body;
+  for (const s of [-1, 1]) {
+    ctx.save(); ctx.translate(s * 6, -6); ctx.rotate(s * sw * 0.04);
+    roundRect(ctx, -2, 0, 4, 8, 2); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  roundRect(ctx, -11, -16, 22, 11, 5); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.moveTo(-11, -13); ctx.quadraticCurveTo(-18, -16, -15, -22); ctx.stroke();
+  ctx.lineWidth = 2; ctx.fillStyle = body;
+  roundRect(ctx, 7, -22, 11, 10, 4); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(9, -22); ctx.lineTo(8, -27); ctx.lineTo(13, -23); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = skel ? pal.dark : '#241f33';
+  ctx.beginPath(); ctx.arc(15, -18, 1.4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(18, -16, 1.6, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawBlock(ctx, u, pal) {
+  const team = u.side === 'player' ? '#3f7fd6' : '#a85fd6';
+  ctx.lineWidth = 2; ctx.strokeStyle = OUTLINE;
+  ctx.fillStyle = '#5b5f68';
+  roundRect(ctx, -18, -28, 36, 30, 4); ctx.fill(); ctx.stroke();
+  ctx.save(); roundRect(ctx, -16, -26, 32, 26, 3); ctx.clip();
+  ctx.fillStyle = '#e0a83a'; ctx.fillRect(-18, -28, 36, 30);
+  ctx.fillStyle = '#2c2a33';
+  for (let i = -24; i <= 26; i += 12) {
+    ctx.beginPath(); ctx.moveTo(i, -28); ctx.lineTo(i + 6, -28); ctx.lineTo(i + 6 - 22, 2); ctx.lineTo(i - 22, 2); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  roundRect(ctx, -18, -28, 36, 30, 4); ctx.stroke();
+  ctx.fillStyle = team; roundRect(ctx, -19, -33, 38, 6, 3); ctx.fill(); ctx.stroke();
+}
+
+function drawCannon(ctx, u, pal) {
+  const skel = pal.skel;
+  const metal = skel ? pal.bone : '#5a5f6b';
+  ctx.lineWidth = 2; ctx.strokeStyle = OUTLINE;
+  ctx.fillStyle = '#3a2f25';
+  for (const wx of [-7, 7]) { ctx.beginPath(); ctx.arc(wx, -5, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  ctx.save(); ctx.translate(0, -12); ctx.rotate(-0.5);
+  ctx.fillStyle = metal; roundRect(ctx, -4, -6, 22, 10, 4); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#1c1a22'; ctx.beginPath(); ctx.arc(18, -1, 3.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = skel ? pal.bone : '#6f7e8c';
+  roundRect(ctx, -17, -20, 9, 14, 4); ctx.fill(); ctx.stroke();
+  drawHead(ctx, pal, skel ? pal.bone : pal.skin, -12, -24);
+}
+
+function drawSniper(ctx, u, pal) {
+  const skel = pal.skel;
+  const cloth = skel ? pal.dark : '#3c4a3a';
+  ctx.lineWidth = 2; ctx.strokeStyle = OUTLINE;
+  ctx.fillStyle = cloth;
+  roundRect(ctx, -7, -26, 15, 22, 6); ctx.fill(); ctx.stroke();
+  drawHead(ctx, pal, skel ? pal.bone : pal.skin, 0, -32);
+  ctx.save(); ctx.translate(4, -24); ctx.rotate(-0.08);
+  ctx.strokeStyle = '#23252e'; ctx.lineWidth = 3.2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(26, -2); ctx.stroke();
+  ctx.fillStyle = '#23252e'; roundRect(ctx, 6, -6, 7, 3, 1); ctx.fill();
+  ctx.restore();
+}
+
+function drawCatapult(ctx, u, pal) {
+  ctx.lineWidth = 2.2; ctx.strokeStyle = OUTLINE;
+  const wood = '#7a5230';
+  ctx.fillStyle = wood;
+  ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(16, 0); ctx.lineTo(12, -6); ctx.lineTo(-12, -6); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#3a2f25';
+  for (const wx of [-12, 12]) { ctx.beginPath(); ctx.arc(wx, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  ctx.fillStyle = wood; roundRect(ctx, -3, -26, 6, 22, 2); ctx.fill(); ctx.stroke();
+  ctx.save(); ctx.translate(0, -24); ctx.rotate(-0.7);
+  ctx.fillStyle = '#8a6038'; roundRect(ctx, -2, -2, 26, 5, 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#9a9aa2'; ctx.beginPath(); ctx.arc(24, 0, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   ctx.restore();
 }
 

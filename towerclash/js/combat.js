@@ -86,6 +86,18 @@ export function nearestEnemyUnitInLane(state, u, aggro) {
   return best;
 }
 
+// 距某点最近的敌方单位（用于狙击手点击锁定）；exclude 为排除的兵种类型
+export function nearestEnemyUnitToPoint(state, side, x, y, maxR, exclude) {
+  let best = null, bestd = maxR;
+  for (const o of state.units) {
+    if (o.state === 'dead' || o.side === side) continue;
+    if (exclude && exclude.includes(o.type)) continue;
+    const d = dist(x, y, o.x, o.y - 12);
+    if (d <= bestd) { bestd = d; best = o; }
+  }
+  return best;
+}
+
 // 半径范围内最近敌方单位（用于箭塔，跨路也能打）
 export function nearestEnemyUnitInRange(state, side, x, y, range) {
   let best = null, bestd = range;

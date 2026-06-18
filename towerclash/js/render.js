@@ -34,6 +34,17 @@ export function draw(ctx, state, view) {
   drawLanes(ctx, state);
   drawSelection(ctx, state);
 
+  // 放置路障时，高亮自家半场可放置的道路区域
+  if (state.pendingAction && state.pendingAction.type === 'placeBlock') {
+    ctx.save();
+    ctx.fillStyle = 'rgba(80,220,120,0.14)';
+    const riverX = FIELD.W / 2 - 30;
+    for (const l of LANES) {
+      ctx.fillRect(SIDES.player.towerX, l.y - 22 * l.scale, riverX - SIDES.player.towerX, 44 * l.scale);
+    }
+    ctx.restore();
+  }
+
   // 建筑 + 单位统一按 y 排序，形成正确遮挡
   const drawables = [];
   for (const b of state.buildings) drawables.push({ y: b.y, kind: 'b', ref: b });
@@ -150,6 +161,14 @@ function drawProjectiles(ctx, state) {
       g.addColorStop(1, 'rgba(140,110,255,0)');
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.fill();
+    } else if (p.kind === 'shell') {
+      const remain = Math.hypot(p.tx - p.x, p.ty - p.y);
+      const prog = p.d0 ? Math.max(0, Math.min(1, 1 - remain / p.d0)) : 0;
+      const yoff = -Math.sin(prog * Math.PI) * 90;
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, 6, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3a3340'; ctx.strokeStyle = '#1c1a22'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y + yoff, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     } else if (p.pierce) {
       ctx.strokeStyle = '#9fe8ff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
       ctx.shadowColor = '#9fe8ff'; ctx.shadowBlur = 8;
@@ -201,6 +220,16 @@ function drawEffects(ctx, state) {
       ctx.globalAlpha = (1 - k) * 0.7;
       ctx.strokeStyle = '#ffe9a8'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.ellipse(e.x, e.y, 18 * (0.3 + k), 7 * (0.3 + k), 0, 0, Math.PI * 2); ctx.stroke();
+    } else if (e.type === 'snipe') {
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      ctx.shadowColor = '#ff5a5a'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.tx, e.ty); ctx.stroke();
+    } else if (e.type === 'lob') {
+      const cx = e.x + (e.tx - e.x) * k;
+      const cy = e.y + (e.ty - e.y) * k - Math.sin(k * Math.PI) * 120;
+      ctx.fillStyle = '#3a3340'; ctx.strokeStyle = '#1c1a22'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     } else if (e.type === 'text') {
       ctx.globalAlpha = 1 - k;
       ctx.fillStyle = e.color;

@@ -47,18 +47,23 @@ export function updateAI(state, dt) {
   // 偶尔随机换一条可用路施压
   if (Math.random() < 0.3) lane = validLanes[(Math.random() * validLanes.length) | 0];
 
-  // 选兵种：优先能负担的较强单位，按压力调味
-  const affordable = UNIT_ORDER.filter(k => UNITS[k].cost <= e.value);
+  // 电脑可用兵种（路障/狙击/投石为玩家专属），且需达到解锁等级、付得起
+  const AI_UNITS = ['infantry', 'dog', 'archer', 'knight', 'mage', 'cannon'];
+  const affordable = AI_UNITS.filter(k => UNITS[k].cost <= e.value && state.threat.lv >= UNITS[k].unlock);
   if (affordable.length === 0) return;
 
   let type;
   const r = Math.random();
   if (laneThreat[lane] >= 2 && affordable.includes('mage') && !mageOnLane(state, lane)) {
     type = 'mage'; // 压力大时驻法师防守
-  } else if (affordable.includes('knight') && r < 0.35) {
+  } else if (affordable.includes('knight') && r < 0.26) {
     type = 'knight';
-  } else if (affordable.includes('archer') && r < 0.65) {
+  } else if (affordable.includes('cannon') && r < 0.44) {
+    type = 'cannon';
+  } else if (affordable.includes('archer') && r < 0.64) {
     type = 'archer';
+  } else if (affordable.includes('dog') && r < 0.80) {
+    type = 'dog';
   } else {
     type = affordable.includes('infantry') ? 'infantry' : affordable[affordable.length - 1];
   }

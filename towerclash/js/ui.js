@@ -1,7 +1,13 @@
-// HUD：能量条、兵种按钮、路选择、顶栏、结算面板
+// HUD：能量条、兵种按钮、路选择、顶栏、解锁提示、瞄准提示、结算面板
 import { UNITS, UNIT_ORDER, LANES, ECONOMY, APP_VERSION } from './data/config.js';
-import { playerSpawn, canAfford } from './game.js';
+import { requestUnit, canAfford, playerHasSpecial } from './game.js';
 import { spawnPoint } from './combat.js';
+
+const PENDING_HINT = {
+  placeBlock: '点击自家半场道路放置路障（点对方侧取消）',
+  aimSniper: '点击要狙杀的地面敌人',
+  aimCatapult: '点击要轰炸的地面位置',
+};
 
 export function initUI(state, onRestart) {
   const el = {
@@ -15,6 +21,8 @@ export function initUI(state, onRestart) {
     resultTitle: document.getElementById('result-title'),
     resultSub: document.getElementById('result-sub'),
     restart: document.getElementById('restart-btn'),
+    toast: document.getElementById('toast'),
+    aimhint: document.getElementById('aimhint'),
   };
 
   // 能量格
@@ -36,7 +44,8 @@ export function initUI(state, onRestart) {
       <span class="ub-name">${u.name}</span>
       <span class="ub-cost">⚡${u.cost}</span>
       <span class="ub-tip">${u.skill}</span>
-      <span class="ub-lock">🔒<br>Lv.${u.unlock}</span>`;
+      <span class="ub-lock">🔒<br>Lv.${u.unlock}</span>
+      <span class="ub-cd"></span>`;
     btn.addEventListener('click', () => trySpawn(key));
     el.buttons.appendChild(btn);
     btnMap[key] = btn;
@@ -55,24 +64,22 @@ export function initUI(state, onRestart) {
 
   el.restart.addEventListener('click', onRestart);
 
-  // 顶栏版本号
   const verEl = document.getElementById('version');
   if (verEl) verEl.textContent = 'v' + APP_VERSION;
 
-  // 解锁提示（toast）
-  const toastEl = document.getElementById('toast');
   function showToast(msg) {
-    if (!toastEl) return;
-    toastEl.textContent = msg;
-    toastEl.classList.remove('show');
-    void toastEl.offsetWidth; // 重启动画
-    toastEl.classList.add('show');
+    if (!el.toast) return;
+    el.toast.textContent = msg;
+    el.toast.classList.remove('show');
+    void el.toast.offsetWidth;
+    el.toast.classList.add('show');
   }
-  let prevLv = state.threat.lv; // 跟踪升级以触发解锁提示
+  let prevLv = state.threat.lv;
 
   function trySpawn(key) {
     const btn = btnMap[key];
-    if (playerSpawn(state, key)) {
+    const res = requestUnit(state, key);
+    if (res === 'ok' || res === 'built' || res === 'pending') {
       btn.classList.add('flash');
       setTimeout(() => btn.classList.remove('flash'), 150);
     } else {
@@ -83,33 +90,56 @@ export function initUI(state, onRestart) {
 
   function update() {
     const e = state.energy.player;
-    // 能量格
     const pips = el.pips.children;
-    for (let i = 0; i < pips.length; i++) {
-      pips[i].classList.toggle('on', i < e.value);
-    }
+    for (let i = 0; i < pips.length; i++) pips[i].classList.toggle('on', i < e.value);
     el.energyNum.textContent = e.value;
-    // 若当前选中路已不可出兵（城楼被毁），自动切到一条可用路
+
+    // 选中路若不可出兵则自动换路
     if (!spawnPoint(state, 'player', state.selectedLane)) {
       const v = [0, 1, 2].find(i => spawnPoint(state, 'player', i));
       if (v !== undefined) state.selectedLane = v;
     }
-    // 按钮可用
     const tower = state.buildings.find(b => b.side === 'player' && b.kind === 'tower' && b.lane === state.selectedLane && b.alive);
     const sp = spawnPoint(state, 'player', state.selectedLane);
+
     for (const key of UNIT_ORDER) {
-      const locked = state.threat.lv < UNITS[key].unlock; // 尚未解锁
-      let blocked;
-      if (key === 'mage') {
-        // 法师需存活城楼且未被占用，不能从主楼出
-        blocked = !tower || (tower.mage && tower.mage.state !== 'dead');
-      } else {
-        blocked = !sp; // 该路城楼被毁且其它路尚存城楼 → 不可出兵
+      const u = UNITS[key];
+      const btn = btnMap[key];
+      const locked = state.threat.lv < u.unlock;
+      let disabled = locked, ready = false, cdText = '';
+      if (!locked) {
+        if (key === 'sniper' || key === 'catapult') {
+          const ex = playerHasSpecial(state, key);
+          if (ex) {
+            if (ex.abilityTimer > 0) { disabled = true; cdText = Math.ceil(ex.abilityTimer) + 's'; }
+            else { ready = true; cdText = '就绪'; }
+          } else {
+            disabled = !canAfford(state, key);
+          }
+        } else if (key === 'mage') {
+          disabled = !canAfford(state, key) || !tower || (tower.mage && tower.mage.state !== 'dead');
+        } else if (key === 'block') {
+          disabled = !canAfford(state, key);
+        } else {
+          disabled = !canAfford(state, key) || !sp;
+        }
       }
-      btnMap[key].classList.toggle('locked', locked);
-      // 未解锁时只显示锁定遮罩（不叠加灰显）；已解锁则按能量/出兵点判断置灰
-      btnMap[key].classList.toggle('disabled', !locked && (!canAfford(state, key) || blocked));
+      btn.classList.toggle('locked', locked);
+      btn.classList.toggle('ready', ready);
+      btn.classList.toggle('disabled', disabled && !ready);
+      const cdEl = btn.querySelector('.ub-cd');
+      if (cdEl) { cdEl.textContent = cdText; cdEl.style.display = cdText ? 'flex' : 'none'; }
     }
+
+    laneBtns.forEach((b, i) => {
+      b.classList.toggle('active', i === state.selectedLane);
+      b.classList.toggle('disabled', !spawnPoint(state, 'player', i));
+    });
+
+    el.threat.textContent = '威胁 Lv.' + state.threat.lv;
+    const m = Math.floor(state.time / 60), s = Math.floor(state.time % 60);
+    el.timer.textContent = `${m}:${String(s).padStart(2, '0')}`;
+
     // 升级解锁提示
     if (state.threat.lv > prevLv) {
       for (const key of UNIT_ORDER) {
@@ -117,16 +147,14 @@ export function initUI(state, onRestart) {
       }
     }
     prevLv = state.threat.lv;
-    // 路按钮：高亮当前路，置灰不可出兵的路
-    laneBtns.forEach((b, i) => {
-      b.classList.toggle('active', i === state.selectedLane);
-      b.classList.toggle('disabled', !spawnPoint(state, 'player', i));
-    });
-    // 顶栏
-    el.threat.textContent = '威胁 Lv.' + state.threat.lv;
-    const m = Math.floor(state.time / 60), s = Math.floor(state.time % 60);
-    el.timer.textContent = `${m}:${String(s).padStart(2, '0')}`;
-    // 结算
+
+    // 放置/瞄准提示
+    if (el.aimhint) {
+      const hint = state.pendingAction ? PENDING_HINT[state.pendingAction.type] : '';
+      el.aimhint.textContent = hint || '';
+      el.aimhint.classList.toggle('show', !!hint);
+    }
+
     if (state.over && el.result.classList.contains('hidden')) {
       el.result.classList.remove('hidden');
       const win = state.result === 'win';
@@ -138,6 +166,8 @@ export function initUI(state, onRestart) {
 
   function reset() {
     el.result.classList.add('hidden');
+    if (el.aimhint) el.aimhint.classList.remove('show');
+    prevLv = state.threat.lv;
   }
 
   return { update, reset, trySpawn };

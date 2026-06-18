@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.18.2';
+export const APP_VERSION = '2026.6.18.3';
 
 export const FIELD = { W: 1280, H: 720 };
 
@@ -45,11 +45,11 @@ export const UNITS = {
   },
   knight: {
     key: 'knight', name: '骑士', icon: '⚔️', cost: 5, unlock: 3,
-    hp: 500, dmg: 60, atkCd: 1.2, range: 40, speed: 88, aggro: 150,
-    squad: 1, kind: 'melee', radius: 16,
+    hp: 500, dmg: 60, atkCd: 1.2, range: 40, speed: 122, aggro: 150,
+    squad: 1, kind: 'melee', radius: 16, trample: true, // 踩踏：不被友军挡速
     resist: { arrow: 0.6 }, // 重甲：免疫 60% 箭矢伤害
-    skill: '冲锋：直行2秒后首次撞击双倍伤害并击退；重甲免疫大半箭矢',
-    charge: { time: 2.0, mult: 2.0, knockback: 64 },
+    skill: '冲锋：高速突进，不被友军减速；首次撞击双倍伤害并击退；重甲免疫大半箭矢',
+    charge: { time: 1.6, mult: 2.0, knockback: 70 },
   },
   mage: {
     key: 'mage', name: '法师', icon: '🔮', cost: 6, unlock: 4,
@@ -59,27 +59,58 @@ export const UNITS = {
     aoe: 50,
     heal: { amount: 15, cd: 2.0, range: 178 },
   },
+  dog: {
+    key: 'dog', name: '狗', icon: '🐕', cost: 2, unlock: 1,
+    hp: 90, dmg: 8, atkCd: 0.8, range: 30, speed: 132, aggro: 200,
+    squad: 1, kind: 'melee', radius: 11,
+    slow: { factor: 0.45, dur: 2.5 }, // 撕咬：命中后大幅减速
+    skill: '撕咬：速度快、伤害低，命中后让敌人减速数秒',
+  },
+  block: {
+    key: 'block', name: '路障', icon: '🧱', cost: 2, unlock: 1,
+    hp: 700, dmg: 0, atkCd: 0, range: 0, speed: 0, aggro: 0,
+    squad: 1, kind: 'block', radius: 19, place: 'ownRoad',
+    skill: '部署在自家半场道路，阻挡双方前进，血厚需被摧毁',
+  },
+  cannon: {
+    key: 'cannon', name: '炮手', icon: '💣', cost: 5, unlock: 5,
+    hp: 95, dmg: 38, atkCd: 2.4, range: 240, speed: 34, aggro: 280,
+    squad: 1, kind: 'ranged', proj: 'shell', projSpeed: 300, aoe: 62, radius: 14,
+    skill: '推车炮手：低频抛物线远程，落点范围爆炸；移动慢、皮薄',
+  },
+  sniper: {
+    key: 'sniper', name: '狙击手', icon: '🎯', cost: 6, unlock: 6,
+    hp: 70, dmg: 9999, kind: 'sniper', radius: 13, place: 'keepTop',
+    ability: { cd: 5 },
+    skill: '驻主楼顶：每5秒点击锁定一名地面敌人秒杀（无法狙杀城楼上的人）',
+  },
+  catapult: {
+    key: 'catapult', name: '投石机', icon: '🪨', cost: 7, unlock: 7,
+    hp: 170, dmg: 130, kind: 'catapult', radius: 18, place: 'keepSide',
+    aoe: 88, ability: { cd: 5 },
+    skill: '建于主楼旁：每5秒点击轰炸任意地面，范围高伤（不能砸城楼）',
+  },
 };
-export const UNIT_ORDER = ['infantry', 'archer', 'knight', 'mage'];
+export const UNIT_ORDER = ['infantry', 'dog', 'block', 'archer', 'knight', 'mage', 'cannon', 'sniper', 'catapult'];
 
 // 建筑
 export const TOWER = { hp: 1000, dmg: 25, atkCd: 1.0, range: 252, projSpeed: 500 };
 export const KEEP = { hp: 2500, dmg: 35, atkCd: 0.9, range: 276, projSpeed: 520 };
 
 // 威胁等级（仅强化电脑），t 为触发秒数。
-// 共 10 级，每 30 秒升一级；全程双倍出兵（double:true）。
-// 整体上移：新 Lv1 = 旧 Lv4（regen 0.95 / 倍率 1.30），Lv10 不变（regen 0.76 / 倍率 1.52），中间线性插值。
+// 共 10 级，每 20 秒升一级；前 3 级不双倍出兵，Lv4 起双倍。
+// 曲线：Lv1 = regen 0.95 / 倍率 1.30，Lv10 = regen 0.76 / 倍率 1.52，中间线性插值。
 export const THREAT = [
-  { lv: 1, t: 0, regen: 0.95, hpMul: 1.30, dmgMul: 1.30, double: true },
-  { lv: 2, t: 30, regen: 0.93, hpMul: 1.32, dmgMul: 1.32, double: true },
-  { lv: 3, t: 60, regen: 0.91, hpMul: 1.35, dmgMul: 1.35, double: true },
-  { lv: 4, t: 90, regen: 0.89, hpMul: 1.37, dmgMul: 1.37, double: true },
-  { lv: 5, t: 120, regen: 0.87, hpMul: 1.40, dmgMul: 1.40, double: true },
-  { lv: 6, t: 150, regen: 0.84, hpMul: 1.42, dmgMul: 1.42, double: true },
-  { lv: 7, t: 180, regen: 0.82, hpMul: 1.45, dmgMul: 1.45, double: true },
-  { lv: 8, t: 210, regen: 0.80, hpMul: 1.47, dmgMul: 1.47, double: true },
-  { lv: 9, t: 240, regen: 0.78, hpMul: 1.50, dmgMul: 1.50, double: true },
-  { lv: 10, t: 270, regen: 0.76, hpMul: 1.52, dmgMul: 1.52, double: true },
+  { lv: 1, t: 0, regen: 0.95, hpMul: 1.30, dmgMul: 1.30, double: false },
+  { lv: 2, t: 20, regen: 0.93, hpMul: 1.32, dmgMul: 1.32, double: false },
+  { lv: 3, t: 40, regen: 0.91, hpMul: 1.35, dmgMul: 1.35, double: false },
+  { lv: 4, t: 60, regen: 0.89, hpMul: 1.37, dmgMul: 1.37, double: true },
+  { lv: 5, t: 80, regen: 0.87, hpMul: 1.40, dmgMul: 1.40, double: true },
+  { lv: 6, t: 100, regen: 0.84, hpMul: 1.42, dmgMul: 1.42, double: true },
+  { lv: 7, t: 120, regen: 0.82, hpMul: 1.45, dmgMul: 1.45, double: true },
+  { lv: 8, t: 140, regen: 0.80, hpMul: 1.47, dmgMul: 1.47, double: true },
+  { lv: 9, t: 160, regen: 0.78, hpMul: 1.50, dmgMul: 1.50, double: true },
+  { lv: 10, t: 180, regen: 0.76, hpMul: 1.52, dmgMul: 1.52, double: true },
 ];
 
 // 骷髅外观名（仅展示用）

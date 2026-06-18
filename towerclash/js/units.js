@@ -14,7 +14,12 @@ export function makeUnit(state, side, type, lane, opts = {}) {
   const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === lane && b.alive);
   let useLane = lane, x, baseY;
 
-  if (type === 'mage') {
+  if (opts.fixed) {
+    // 指定位置生成（路障/狙击手/投石机）
+    useLane = opts.fixed.lane ?? lane;
+    x = opts.fixed.x;
+    baseY = opts.fixed.baseY;
+  } else if (type === 'mage') {
     // 驻塔：站在城楼顶
     x = tower ? tower.x : SIDES[side].towerX;
     baseY = (tower ? tower.y : LANES[lane].y) - 36;
@@ -41,6 +46,10 @@ export function makeUnit(state, side, type, lane, opts = {}) {
     marchTime: 0, charging: false, chargeUsed: false,
     // 弓兵穿透
     shotCount: 0,
+    // 狗减速 debuff
+    slowUntil: 0, slowFactor: 1,
+    // 狙击手/投石机技能冷却
+    abilityTimer: 0,
     // 法师驻塔
     tower: type === 'mage' ? tower : null,
   };
@@ -62,6 +71,28 @@ export function spawnSquad(state, side, type, lane) {
   return out;
 }
 
+// 路障：放在自家半场某路的指定 x
+export function spawnBlock(state, side, lane, x) {
+  const u = makeUnit(state, side, 'block', lane, { fixed: { x, baseY: LANES[lane].y, lane } });
+  state.units.push(u);
+  addEffect(state, { type: 'spawn', x, y: LANES[lane].y, life: 0.5 });
+  return u;
+}
+
+// 狙击手（主楼顶）/ 投石机（主楼旁）
+export function spawnSpecial(state, side, type) {
+  const keep = state.buildings.find(b => b.side === side && b.kind === 'keep' && b.alive);
+  if (!keep) return null;
+  const dir = SIDES[side].dir;
+  const fixed = type === 'sniper'
+    ? { x: keep.x, baseY: keep.y - 118, lane: 1 }
+    : { x: keep.x + dir * 50, baseY: keep.y + 14, lane: 1 };
+  const u = makeUnit(state, side, type, 1, { fixed });
+  state.units.push(u);
+  addEffect(state, { type: 'spawn', x: u.x, y: u.baseY, life: 0.5 });
+  return u;
+}
+
 export function updateUnits(state, dt) {
   for (const u of state.units) {
     if (u.state === 'dead') { u.deathT += dt; continue; }
@@ -69,6 +100,11 @@ export function updateUnits(state, dt) {
     if (u.hitFlash > 0) u.hitFlash = Math.max(0, u.hitFlash - dt * 4);
     if (u.attackAnim > 0) u.attackAnim = Math.max(0, u.attackAnim - dt * 4);
     u.atkTimer = Math.max(0, u.atkTimer - dt);
+
+    // 路障：静止、无攻击（仅可被摧毁）
+    if (u.type === 'block') continue;
+    // 狙击手/投石机：静止结构，玩家点击触发，仅推进技能冷却
+    if (u.type === 'sniper' || u.type === 'catapult') { u.abilityTimer = Math.max(0, u.abilityTimer - dt); continue; }
 
     if (u.type === 'mage') { updateMage(state, u, dt); continue; }
 
@@ -115,15 +151,27 @@ function marchForward(state, u, dt) {
 function moveToward(state, u, tx, ty, dt, snapLane = true) {
   const dirX = Math.sign(tx - u.x) || u.dir;
   u.facing = dirX;
-  // 简单避让：靠太近的同侧前方单位减速
   let speed = u.cfg.speed;
-  for (const o of state.units) {
-    if (o === u || o.state === 'dead' || o.side !== u.side || o.lane !== u.lane) continue;
-    if (Math.sign(o.x - u.x) === dirX && Math.abs(o.x - u.x) < (u.cfg.radius + o.cfg.radius)) {
-      speed *= 0.35; break;
+  // 减速 debuff（狗撕咬）
+  if (u.slowUntil && state.time < u.slowUntil) speed *= (u.slowFactor || 1);
+  // 友军避让减速（骑士踩踏：无视友军）
+  if (!u.cfg.trample) {
+    for (const o of state.units) {
+      if (o === u || o.state === 'dead' || o.side !== u.side || o.lane !== u.lane) continue;
+      if (o.type === 'block') continue;
+      if (Math.sign(o.x - u.x) === dirX && Math.abs(o.x - u.x) < (u.cfg.radius + o.cfg.radius)) {
+        speed *= 0.35; break;
+      }
     }
   }
   u.x += dirX * speed * dt;
+  // 路障阻挡：双方都无法穿过
+  for (const o of state.units) {
+    if (o === u || o.state === 'dead' || o.type !== 'block' || o.lane !== u.lane) continue;
+    const gap = (o.x - u.x) * dirX;
+    const minGap = u.cfg.radius + o.cfg.radius;
+    if (gap > 0 && gap < minGap) { u.x = o.x - dirX * minGap; break; }
+  }
   if (snapLane) {
     // 回到本路中心线
     u.y += (u.baseY - u.y) * Math.min(1, dt * 4);
@@ -167,11 +215,28 @@ function doAttack(state, u, target, isBuilding) {
   } else {
     // 近战瞬时
     if (isBuilding) damageBuilding(state, target, dmg);
-    else damageUnit(state, target, dmg, { kind: 'melee', attacker: u });
+    else {
+      damageUnit(state, target, dmg, { kind: 'melee', attacker: u });
+      // 狗撕咬：命中后给敌人套减速
+      if (u.cfg.slow && target.state !== 'dead' && target.type !== 'block') {
+        target.slowUntil = state.time + u.cfg.slow.dur;
+        target.slowFactor = u.cfg.slow.factor;
+        addFloatText(state, target.x, target.y - 26, '减速', '#7fd3ff');
+      }
+    }
   }
 }
 
 function fireArrow(state, u, target, dmg, isBuilding) {
+  // 炮手：抛物线炮弹，落点范围爆炸
+  if (u.cfg.proj === 'shell') {
+    const d0 = Math.max(1, dist(u.x, u.y, target.x, target.y));
+    spawnProjectile(state, {
+      kind: 'shell', side: u.side, x: u.x, y: u.y - 16, x0: u.x, y0: u.y - 16,
+      tx: target.x, ty: target.y, d0, speed: u.cfg.projSpeed, dmg, aoe: u.cfg.aoe, lane: u.lane,
+    });
+    return;
+  }
   u.shotCount++;
   const pierce = u.cfg.pierceEvery && (u.shotCount % u.cfg.pierceEvery === 0);
   if (pierce && !isBuilding) {
