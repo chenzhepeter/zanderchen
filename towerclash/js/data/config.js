@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.18.1';
+export const APP_VERSION = '2026.6.18.2';
 
 export const FIELD = { W: 1280, H: 720 };
 
@@ -67,17 +67,17 @@ export const TOWER = { hp: 1000, dmg: 25, atkCd: 1.0, range: 252, projSpeed: 500
 export const KEEP = { hp: 2500, dmg: 35, atkCd: 0.9, range: 276, projSpeed: 520 };
 
 // 威胁等级（仅强化电脑），t 为触发秒数。
-// 共 10 级，每 30 秒升一级；Lv6 起双倍出兵。
-// 加强曲线：前段更陡（新 Lv4 ≈ 旧 Lv7：regen 0.95 / 倍率 1.30），顶级新 Lv10 ≈ 旧 Lv10 再 +5%。
+// 共 10 级，每 30 秒升一级；全程双倍出兵（double:true）。
+// 整体上移：新 Lv1 = 旧 Lv4（regen 0.95 / 倍率 1.30），Lv10 不变（regen 0.76 / 倍率 1.52），中间线性插值。
 export const THREAT = [
-  { lv: 1, t: 0, regen: 1.20, hpMul: 1.00, dmgMul: 1.00, double: false },
-  { lv: 2, t: 30, regen: 1.10, hpMul: 1.10, dmgMul: 1.10, double: false },
-  { lv: 3, t: 60, regen: 1.02, hpMul: 1.20, dmgMul: 1.20, double: false },
-  { lv: 4, t: 90, regen: 0.95, hpMul: 1.30, dmgMul: 1.30, double: false },
-  { lv: 5, t: 120, regen: 0.90, hpMul: 1.36, dmgMul: 1.36, double: false },
-  { lv: 6, t: 150, regen: 0.86, hpMul: 1.41, dmgMul: 1.41, double: true },
-  { lv: 7, t: 180, regen: 0.83, hpMul: 1.45, dmgMul: 1.45, double: true },
-  { lv: 8, t: 210, regen: 0.80, hpMul: 1.48, dmgMul: 1.48, double: true },
+  { lv: 1, t: 0, regen: 0.95, hpMul: 1.30, dmgMul: 1.30, double: true },
+  { lv: 2, t: 30, regen: 0.93, hpMul: 1.32, dmgMul: 1.32, double: true },
+  { lv: 3, t: 60, regen: 0.91, hpMul: 1.35, dmgMul: 1.35, double: true },
+  { lv: 4, t: 90, regen: 0.89, hpMul: 1.37, dmgMul: 1.37, double: true },
+  { lv: 5, t: 120, regen: 0.87, hpMul: 1.40, dmgMul: 1.40, double: true },
+  { lv: 6, t: 150, regen: 0.84, hpMul: 1.42, dmgMul: 1.42, double: true },
+  { lv: 7, t: 180, regen: 0.82, hpMul: 1.45, dmgMul: 1.45, double: true },
+  { lv: 8, t: 210, regen: 0.80, hpMul: 1.47, dmgMul: 1.47, double: true },
   { lv: 9, t: 240, regen: 0.78, hpMul: 1.50, dmgMul: 1.50, double: true },
   { lv: 10, t: 270, regen: 0.76, hpMul: 1.52, dmgMul: 1.52, double: true },
 ];
