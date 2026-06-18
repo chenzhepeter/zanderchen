@@ -3,7 +3,10 @@ import { UNITS, LANES, SIDES } from './data/config.js';
 import {
   nextId, dist, damageUnit, damageBuilding, spawnProjectile, addEffect, addFloatText,
   nearestEnemyUnitInLane, nearestEnemyUnitInRange, enemyStructureOnLane, spawnPoint,
+  mostExpensiveEnemy, bestBombCenter,
 } from './combat.js';
+
+const TOWER_MOUNTED = ['mage', 'sniper', 'catapult']; // 城楼/主楼上的人，狙击/投石不打
 
 // 在有效出兵点生成一名单位（mage 例外：驻城楼顶）
 export function makeUnit(state, side, type, lane, opts = {}) {
@@ -104,8 +107,8 @@ export function updateUnits(state, dt) {
 
     // 路障：静止、无攻击（仅可被摧毁）
     if (u.type === 'block') continue;
-    // 狙击手/投石机：静止结构，玩家点击触发，仅推进技能冷却
-    if (u.type === 'sniper' || u.type === 'catapult') { u.abilityTimer = Math.max(0, u.abilityTimer - dt); continue; }
+    // 狙击手/投石机：静止结构，每 5s 自动寻敌开火
+    if (u.type === 'sniper' || u.type === 'catapult') { updateSpecial(state, u, dt); continue; }
 
     if (u.type === 'mage') { updateMage(state, u, dt); continue; }
 
@@ -215,7 +218,7 @@ function doAttack(state, u, target, isBuilding) {
     fireArrow(state, u, target, dmg, isBuilding);
   } else {
     // 近战瞬时
-    if (isBuilding) damageBuilding(state, target, dmg);
+    if (isBuilding) damageBuilding(state, target, dmg, { siege: !!u.cfg.siege });
     else {
       damageUnit(state, target, dmg, { kind: 'melee', attacker: u });
       // 狗撕咬：命中后给敌人套减速
@@ -287,6 +290,32 @@ function updateMage(state, u, dt) {
       tx: enemyU.x, ty: enemyU.y, speed: u.cfg.projSpeed,
       dmg: u.cfg.dmg * u.dmgMul, aoe: u.cfg.aoe, lane: u.lane,
     });
+  }
+}
+
+// 狙击手/投石机：每 5s 自动寻敌开火
+function updateSpecial(state, u, dt) {
+  u.abilityTimer = Math.max(0, u.abilityTimer - dt);
+  if (u.abilityTimer > 0) return;
+  if (u.type === 'sniper') {
+    // 狙杀最贵的敌方地面单位（秒杀），不打城楼/主楼上的人
+    const t = mostExpensiveEnemy(state, u.side, TOWER_MOUNTED);
+    if (!t) return;
+    t.hp = 0; t.state = 'dead'; t.deathT = 0;
+    u.abilityTimer = u.cfg.ability.cd; u.attackAnim = 1; u.facing = Math.sign(t.x - u.x) || u.dir;
+    addEffect(state, { type: 'snipe', x: u.x, y: u.y - 12, tx: t.x, ty: t.y - 12, life: 0.25 });
+    addEffect(state, { type: 'hit', x: t.x, y: t.y - 12, life: 0.35, big: true });
+  } else {
+    // 轰炸敌人最密集（潜在伤害最大）的团体；不砸城楼
+    const c = bestBombCenter(state, u.side, u.cfg.aoe, TOWER_MOUNTED);
+    if (!c) return;
+    for (const o of state.units) {
+      if (o.state === 'dead' || o.side === u.side) continue;
+      if (dist(c.x, c.y, o.x, o.y - 10) <= u.cfg.aoe) damageUnit(state, o, u.cfg.dmg, { kind: 'orb' });
+    }
+    u.abilityTimer = u.cfg.ability.cd; u.attackAnim = 1;
+    addEffect(state, { type: 'lob', x: u.x, y: u.y - 20, tx: c.x, ty: c.y, life: 0.6 });
+    addEffect(state, { type: 'boom', x: c.x, y: c.y, life: 0.5, r: u.cfg.aoe });
   }
 }
 

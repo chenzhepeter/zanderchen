@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.18.5';
+export const APP_VERSION = '2026.6.18.6';
 
 export const FIELD = { W: 1280, H: 720 };
 
@@ -74,9 +74,9 @@ export const UNITS = {
   },
   cannon: {
     key: 'cannon', name: '炮手', icon: '💣', cost: 5, unlock: 5,
-    hp: 95, dmg: 38, atkCd: 2.4, range: 240, speed: 34, aggro: 280,
-    squad: 1, kind: 'ranged', proj: 'shell', projSpeed: 300, aoe: 62, radius: 14,
-    skill: '推车炮手：低频抛物线远程，落点范围爆炸；移动慢、皮薄',
+    hp: 95, dmg: 38, atkCd: 3.6, range: 240, speed: 34, aggro: 280,
+    squad: 1, kind: 'ranged', proj: 'shell', projSpeed: 300, aoe: 62, radius: 14, siege: true,
+    skill: '推车炮手：低频抛物线远程，落点范围爆炸；攻坚利器（对城楼/主楼伤害高），移动慢、皮薄',
   },
   sniper: {
     key: 'sniper', name: '狙击手', icon: '🎯', cost: 6, unlock: 6,

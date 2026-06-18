@@ -278,19 +278,31 @@ function drawDog(ctx, u, pal) {
 }
 
 function drawBlock(ctx, u, pal) {
+  // 罗马拒马 / 削尖木栅（cheval de frise）
   const team = u.side === 'player' ? '#3f7fd6' : '#a85fd6';
-  ctx.lineWidth = 2; ctx.strokeStyle = OUTLINE;
-  ctx.fillStyle = '#5b5f68';
-  roundRect(ctx, -18, -28, 36, 30, 4); ctx.fill(); ctx.stroke();
-  ctx.save(); roundRect(ctx, -16, -26, 32, 26, 3); ctx.clip();
-  ctx.fillStyle = '#e0a83a'; ctx.fillRect(-18, -28, 36, 30);
-  ctx.fillStyle = '#2c2a33';
-  for (let i = -24; i <= 26; i += 12) {
-    ctx.beginPath(); ctx.moveTo(i, -28); ctx.lineTo(i + 6, -28); ctx.lineTo(i + 6 - 22, 2); ctx.lineTo(i - 22, 2); ctx.closePath(); ctx.fill();
+  const wood = '#8a5a2b', woodD = '#5e3f24';
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  // 中央横梁
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.fillStyle = woodD;
+  roundRect(ctx, -20, -11, 40, 6, 2); ctx.fill(); ctx.stroke();
+  // 交叉削尖木桩（X 形）
+  ctx.strokeStyle = wood; ctx.lineWidth = 5;
+  for (const cx of [-13, 0, 13]) {
+    ctx.beginPath(); ctx.moveTo(cx - 9, -1); ctx.lineTo(cx + 9, -24); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + 9, -1); ctx.lineTo(cx - 9, -24); ctx.stroke();
   }
-  ctx.restore();
-  roundRect(ctx, -18, -28, 36, 30, 4); ctx.stroke();
-  ctx.fillStyle = team; roundRect(ctx, -19, -33, 38, 6, 3); ctx.fill(); ctx.stroke();
+  // 尖头描边点缀
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.4;
+  for (const cx of [-13, 0, 13]) {
+    ctx.beginPath(); ctx.moveTo(cx - 9, -24); ctx.lineTo(cx - 7, -27); ctx.moveTo(cx + 9, -24); ctx.lineTo(cx + 7, -27); ctx.stroke();
+  }
+  // 队伍小旗
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(0, -32); ctx.stroke();
+  ctx.fillStyle = team;
+  ctx.beginPath(); ctx.moveTo(0, -32); ctx.lineTo(11, -29.5); ctx.lineTo(0, -27); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.lineCap = 'butt';
 }
 
 function drawCannon(ctx, u, pal) {

@@ -56,9 +56,13 @@ export function damageUnit(state, u, amount, opts = {}) {
   }
 }
 
+// 对建筑伤害倍率：攻坚单位（炮）满威力，其余兵种伤害有限 → 需用炮攻坚
+export const VS_BUILDING = { siege: 2.5, normal: 0.4 };
+
 // ---- 伤害：建筑 ----
-export function damageBuilding(state, b, amount) {
+export function damageBuilding(state, b, amount, opts = {}) {
   if (!b || !b.alive) return;
+  amount *= opts.siege ? VS_BUILDING.siege : VS_BUILDING.normal;
   b.hp -= amount;
   b.flash = 1;
   if (b.hp <= 0) {
@@ -86,7 +90,32 @@ export function nearestEnemyUnitInLane(state, u, aggro) {
   return best;
 }
 
-// 距某点最近的敌方单位（用于狙击手点击锁定）；exclude 为排除的兵种类型
+// 自动寻敌：最贵的敌方单位（狙击手用）。exclude 排除城楼/主楼上的人
+export function mostExpensiveEnemy(state, side, exclude) {
+  let best = null, bestCost = -1;
+  for (const o of state.units) {
+    if (o.state === 'dead' || o.side === side) continue;
+    if (exclude && exclude.includes(o.type)) continue;
+    const cost = (UNITS[o.type] && UNITS[o.type].cost) || 0;
+    if (cost > bestCost) { bestCost = cost; best = o; }
+  }
+  return best;
+}
+
+// 自动寻敌：以某敌方单位为中心、aoe 半径内敌人最多的落点（投石机用）
+export function bestBombCenter(state, side, aoe, exclude) {
+  const foes = state.units.filter(o => o.state !== 'dead' && o.side !== side && !(exclude && exclude.includes(o.type)));
+  if (!foes.length) return null;
+  let best = null, bestN = 0;
+  for (const c of foes) {
+    let n = 0;
+    for (const o of foes) if (dist(c.x, c.y, o.x, o.y) <= aoe) n++;
+    if (n > bestN) { bestN = n; best = c; }
+  }
+  return best ? { x: best.x, y: best.y, n: bestN } : null;
+}
+
+// 距某点最近的敌方单位；exclude 为排除的兵种类型
 export function nearestEnemyUnitToPoint(state, side, x, y, maxR, exclude) {
   let best = null, bestd = maxR;
   for (const o of state.units) {

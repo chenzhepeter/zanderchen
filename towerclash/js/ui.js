@@ -5,8 +5,6 @@ import { spawnPoint } from './combat.js';
 
 const PENDING_HINT = {
   placeBlock: '点击自家半场道路放置路障（点对方侧取消）',
-  aimSniper: '点击要狙杀的地面敌人',
-  aimCatapult: '点击要轰炸的地面位置',
 };
 
 // 为某一侧在容器内构建一套 HUD，返回 { update, trySpawn }
@@ -90,8 +88,9 @@ function createHud(state, side, container) {
         if (key === 'sniper' || key === 'catapult') {
           const ex = hasSpecial(state, side, key);
           if (ex) {
-            if (ex.abilityTimer > 0) { disabled = true; cdText = Math.ceil(ex.abilityTimer) + 's'; }
-            else { ready = true; cdText = '就绪'; }
+            // 已建造：自动寻敌开火，按钮仅显示冷却信息
+            disabled = true;
+            cdText = ex.abilityTimer > 0 ? Math.ceil(ex.abilityTimer) + 's' : '⚔';
           } else disabled = !canAfford(state, side, key);
         } else if (key === 'mage') {
           disabled = !canAfford(state, side, key) || !tower || (tower.mage && tower.mage.state !== 'dead');

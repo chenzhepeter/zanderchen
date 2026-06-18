@@ -1,6 +1,6 @@
 // 游戏核心：全局状态 + 模拟推进 + 能量 + 投射物 + 胜负判定
 import { ECONOMY, UNITS, THREAT, FIELD, SIDES, LANES } from './data/config.js';
-import { dist, damageUnit, damageBuilding, addEffect, spawnPoint, nearestEnemyUnitToPoint } from './combat.js';
+import { dist, damageUnit, damageBuilding, addEffect, spawnPoint } from './combat.js';
 import { createBuildings, updateBuildings, keepOf } from './towers.js';
 import { spawnSquad, spawnBlock, spawnSpecial, updateUnits, cleanupUnits } from './units.js';
 import { updateAI, updateThreat } from './ai.js';
@@ -89,18 +89,13 @@ export function requestUnit(state, side, type) {
     return 'pending';
   }
   if (type === 'sniper' || type === 'catapult') {
-    const ex = hasSpecial(state, side, type);
-    if (!ex) {
-      if (e.value < cfg.cost) return 'poor';
-      const keep = state.buildings.find(b => b.side === side && b.kind === 'keep' && b.alive);
-      if (!keep) return 'no';
-      e.value -= cfg.cost;
-      spawnSpecial(state, side, type);
-      return 'built';
-    }
-    if (ex.abilityTimer > 0) return 'cd';
-    state.pending[side] = { type: type === 'sniper' ? 'aimSniper' : 'aimCatapult', unit: ex };
-    return 'pending';
+    if (hasSpecial(state, side, type)) return 'cd'; // 已建造，自动寻敌开火，无需操作
+    if (e.value < cfg.cost) return 'poor';
+    const keep = state.buildings.find(b => b.side === side && b.kind === 'keep' && b.alive);
+    if (!keep) return 'no';
+    e.value -= cfg.cost;
+    spawnSpecial(state, side, type);
+    return 'built';
   }
   return spawnFor(state, side, type) ? 'ok' : 'no';
 }
@@ -122,36 +117,6 @@ export function resolveTap(state, side, x, y) {
     for (const l of LANES) { const d = Math.abs(l.y - y); if (d < ld) { ld = d; lane = l.id; } }
     const e = state.energy[side];
     if (e.value >= a.cost) { e.value -= a.cost; spawnBlock(state, side, lane, px); }
-    return true;
-  }
-  if (a.type === 'aimSniper') {
-    const s = a.unit;
-    if (s.state !== 'dead' && s.abilityTimer <= 0) {
-      // 不能狙杀城楼/主楼上的人（法师、对方狙击手/投石机）
-      const tgt = nearestEnemyUnitToPoint(state, side, x, y, 90, ['mage', 'sniper', 'catapult']);
-      if (tgt) {
-        tgt.hp = 0; tgt.state = 'dead'; tgt.deathT = 0;
-        s.abilityTimer = UNITS.sniper.ability.cd; s.attackAnim = 1;
-        addEffect(state, { type: 'snipe', x: s.x, y: s.y - 12, tx: tgt.x, ty: tgt.y - 12, life: 0.25 });
-        addEffect(state, { type: 'hit', x: tgt.x, y: tgt.y - 12, life: 0.35, big: true });
-      } else {
-        state.pending[side] = a; // 没点到目标，保持瞄准
-      }
-    }
-    return true;
-  }
-  if (a.type === 'aimCatapult') {
-    const c = a.unit;
-    if (c.state !== 'dead' && c.abilityTimer <= 0) {
-      const cfg = UNITS.catapult;
-      for (const o of state.units) {
-        if (o.state === 'dead' || o.side === side) continue;
-        if (dist(x, y, o.x, o.y - 10) <= cfg.aoe) damageUnit(state, o, cfg.dmg, { kind: 'orb' });
-      }
-      c.abilityTimer = cfg.ability.cd; c.attackAnim = 1;
-      addEffect(state, { type: 'lob', x: c.x, y: c.y - 20, tx: x, ty: y, life: 0.6 });
-      addEffect(state, { type: 'boom', x, y, life: 0.5, r: cfg.aoe });
-    }
     return true;
   }
   return true;
@@ -213,6 +178,13 @@ function updateProjectiles(state, dt) {
         for (const o of state.units) {
           if (o.state === 'dead' || o.side === pr.side) continue;
           if (dist(pr.x, pr.y, o.x, o.y - 10) <= pr.aoe) damageUnit(state, o, pr.dmg, { kind: 'orb' });
+        }
+        // 炮弹攻坚：落点范围内的敌方城楼/主楼受高额伤害
+        if (pr.kind === 'shell') {
+          for (const b of state.buildings) {
+            if (!b.alive || b.side === pr.side) continue;
+            if (dist(pr.x, pr.y, b.x, b.y - 22) <= pr.aoe + 32) damageBuilding(state, b, pr.dmg, { siege: true });
+          }
         }
         addEffect(state, { type: 'boom', x: pr.x, y: pr.y, life: 0.4, r: pr.aoe });
         pr.dead = true;
