@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.18.7';
+export const APP_VERSION = '2026.6.19.1';
 
 export const FIELD = { W: 1280, H: 720 };
 
@@ -97,20 +97,21 @@ export const UNIT_ORDER = ['infantry', 'dog', 'block', 'archer', 'knight', 'mage
 export const TOWER = { hp: 1000, dmg: 25, atkCd: 1.0, range: 252, projSpeed: 500 };
 export const KEEP = { hp: 2500, dmg: 35, atkCd: 0.9, range: 276, projSpeed: 520 };
 
-// 威胁等级（仅强化电脑），t 为触发秒数。
-// 共 10 级，每 20 秒升一级；前 3 级不双倍出兵，Lv4 起双倍。
-// 曲线：Lv1 = regen 0.95 / 倍率 1.30，Lv10 = regen 0.76 / 倍率 1.52，中间线性插值。
+// 威胁等级（仅强化电脑），t 为触发秒数。共 10 级，每 20 秒升一级。
+// AI 已升级，难度主要来自智力而非数值碾压，故数值温和：
+//  血/攻倍率 1.15→1.30（PvE 再 ×0.9 实际 ~1.04→1.17）；
+//  能量回复 regen 0.95→0.86（PvE 再 ×1.1 实际 1.045→0.95：前中期不快于玩家，后期最多快约 5%）。
 export const THREAT = [
-  { lv: 1, t: 0, regen: 0.95, hpMul: 1.30, dmgMul: 1.30, double: false },
-  { lv: 2, t: 20, regen: 0.93, hpMul: 1.32, dmgMul: 1.32, double: false },
-  { lv: 3, t: 40, regen: 0.91, hpMul: 1.35, dmgMul: 1.35, double: false },
-  { lv: 4, t: 60, regen: 0.89, hpMul: 1.37, dmgMul: 1.37, double: true },
-  { lv: 5, t: 80, regen: 0.87, hpMul: 1.40, dmgMul: 1.40, double: true },
-  { lv: 6, t: 100, regen: 0.84, hpMul: 1.42, dmgMul: 1.42, double: true },
-  { lv: 7, t: 120, regen: 0.82, hpMul: 1.45, dmgMul: 1.45, double: true },
-  { lv: 8, t: 140, regen: 0.80, hpMul: 1.47, dmgMul: 1.47, double: true },
-  { lv: 9, t: 160, regen: 0.78, hpMul: 1.50, dmgMul: 1.50, double: true },
-  { lv: 10, t: 180, regen: 0.76, hpMul: 1.52, dmgMul: 1.52, double: true },
+  { lv: 1, t: 0, regen: 0.95, hpMul: 1.15, dmgMul: 1.15 },
+  { lv: 2, t: 20, regen: 0.94, hpMul: 1.17, dmgMul: 1.17 },
+  { lv: 3, t: 40, regen: 0.93, hpMul: 1.18, dmgMul: 1.18 },
+  { lv: 4, t: 60, regen: 0.92, hpMul: 1.20, dmgMul: 1.20 },
+  { lv: 5, t: 80, regen: 0.91, hpMul: 1.22, dmgMul: 1.22 },
+  { lv: 6, t: 100, regen: 0.90, hpMul: 1.23, dmgMul: 1.23 },
+  { lv: 7, t: 120, regen: 0.89, hpMul: 1.25, dmgMul: 1.25 },
+  { lv: 8, t: 140, regen: 0.88, hpMul: 1.27, dmgMul: 1.27 },
+  { lv: 9, t: 160, regen: 0.87, hpMul: 1.28, dmgMul: 1.28 },
+  { lv: 10, t: 180, regen: 0.86, hpMul: 1.30, dmgMul: 1.30 },
 ];
 
 // 玩家 vs 电脑：NPC 威胁整体下调 ~10%（仅作用于 AI 侧；不影响 PvP，也不改解锁节奏）
