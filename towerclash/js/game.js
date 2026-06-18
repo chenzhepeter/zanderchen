@@ -5,11 +5,17 @@ import { createBuildings, updateBuildings, keepOf } from './towers.js';
 import { spawnSquad, spawnBlock, spawnSpecial, updateUnits, cleanupUnits } from './units.js';
 import { updateAI, updateThreat } from './ai.js';
 
-export function createGame() {
+export function createGame(mode = 'pve') {
+  const controllers = mode === 'pvp'
+    ? { player: 'human', enemy: 'human' }
+    : { player: 'human', enemy: 'ai' };
   const state = {
+    mode,                // 'pve' | 'pvp'
+    started: false,      // 选择菜单后才开始
+    controllers,         // 每侧 'human' | 'ai'
     time: 0,
     over: false,
-    result: null, // 'win' | 'lose'
+    result: null, // 'win' | 'lose'（win=敌主楼倒，lose=己主楼倒；UI 按模式翻译）
     threat: THREAT[0],
     units: [],
     buildings: [],
@@ -20,103 +26,116 @@ export function createGame() {
       enemy: { value: ECONOMY.start, acc: 0 },
     },
     ai: { timer: 1.5 },
-    selectedLane: 1, // 当前出兵城楼（路）
-    pendingAction: null, // 放置路障 / 狙击瞄准 / 投石瞄准
+    selected: { player: 1, enemy: 1 }, // 各侧当前出兵路
+    pending: { player: null, enemy: null }, // 各侧放置/瞄准
     dirty: true,
   };
   state.buildings = createBuildings(state);
   return state;
 }
 
-// 玩家出兵（被 input/ui 调用）。返回是否成功。
-export function playerSpawn(state, type) {
+// 就地用新模式重建（保持 state 引用不变，供已绑定该引用的 UI/input 复用）
+export function startGame(state, mode) {
+  const fresh = createGame(mode);
+  fresh.started = true;
+  for (const k of Object.keys(state)) delete state[k];
+  Object.assign(state, fresh);
+}
+
+export function isAI(state, side) {
+  return state.controllers[side] === 'ai';
+}
+
+// 某侧出兵。返回是否成功。
+export function spawnFor(state, side, type) {
   if (state.over) return false;
   const cfg = UNITS[type];
-  if (state.threat.lv < cfg.unlock) return false; // 该兵种尚未解锁（按威胁等级逐级解锁）
-  const e = state.energy.player;
+  if (state.threat.lv < cfg.unlock) return false; // 尚未解锁（按等级逐级解锁，双方同步）
+  const e = state.energy[side];
   if (e.value < cfg.cost) return false;
-  const lane = state.selectedLane;
+  const lane = state.selected[side];
   if (type === 'mage') {
-    // 法师需驻存活城楼（每城楼限一名），不能从主楼出
-    const tower = state.buildings.find(b => b.side === 'player' && b.kind === 'tower' && b.lane === lane && b.alive);
+    const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === lane && b.alive);
     if (!tower) return false;
     if (tower.mage && tower.mage.state !== 'dead') return false;
   } else {
-    // 该路城楼被毁则不能出兵；三城楼全毁时从主楼出
-    if (!spawnPoint(state, 'player', lane)) return false;
+    if (!spawnPoint(state, side, lane)) return false;
   }
   e.value -= cfg.cost;
-  spawnSquad(state, 'player', type, lane);
+  spawnSquad(state, side, type, lane);
   return true;
 }
 
-export function canAfford(state, type) {
-  return state.energy.player.value >= UNITS[type].cost;
+export function canAfford(state, side, type) {
+  return state.energy[side].value >= UNITS[type].cost;
 }
 
-// 玩家已部署的特殊结构（狙击手/投石机，每种限一座）
-export function playerHasSpecial(state, type) {
-  return state.units.find(u => u.side === 'player' && u.type === type && u.state !== 'dead') || null;
+// 某侧已部署的特殊结构（狙击手/投石机，每种限一座）
+export function hasSpecial(state, side, type) {
+  return state.units.find(u => u.side === side && u.type === type && u.state !== 'dead') || null;
 }
 
 // 按钮点击分发：普通兵种直接出兵；路障/狙击/投石进入放置或瞄准模式。
 // 返回状态码供 UI 反馈：ok/built/pending/locked/poor/cd/no
-export function requestUnit(state, type) {
-  if (state.over) return 'no';
+export function requestUnit(state, side, type) {
+  if (state.over || !state.started) return 'no';
   const cfg = UNITS[type];
   if (state.threat.lv < cfg.unlock) return 'locked';
-  const e = state.energy.player;
+  const e = state.energy[side];
 
   if (type === 'block') {
     if (e.value < cfg.cost) return 'poor';
-    state.pendingAction = { type: 'placeBlock', cost: cfg.cost };
+    state.pending[side] = { type: 'placeBlock', cost: cfg.cost };
     return 'pending';
   }
   if (type === 'sniper' || type === 'catapult') {
-    const ex = playerHasSpecial(state, type);
+    const ex = hasSpecial(state, side, type);
     if (!ex) {
       if (e.value < cfg.cost) return 'poor';
-      const keep = state.buildings.find(b => b.side === 'player' && b.kind === 'keep' && b.alive);
+      const keep = state.buildings.find(b => b.side === side && b.kind === 'keep' && b.alive);
       if (!keep) return 'no';
       e.value -= cfg.cost;
-      spawnSpecial(state, 'player', type);
+      spawnSpecial(state, side, type);
       return 'built';
     }
     if (ex.abilityTimer > 0) return 'cd';
-    state.pendingAction = { type: type === 'sniper' ? 'aimSniper' : 'aimCatapult', unit: ex };
+    state.pending[side] = { type: type === 'sniper' ? 'aimSniper' : 'aimCatapult', unit: ex };
     return 'pending';
   }
-  return playerSpawn(state, type) ? 'ok' : 'no';
+  return spawnFor(state, side, type) ? 'ok' : 'no';
 }
 
-// 解析战场点击（处于放置/瞄准模式时）
-export function resolveTap(state, x, y) {
-  const a = state.pendingAction;
+// 解析战场点击（某侧处于放置/瞄准模式时）
+export function resolveTap(state, side, x, y) {
+  const a = state.pending[side];
   if (!a) return false;
-  state.pendingAction = null;
+  state.pending[side] = null;
+  const mid = FIELD.W / 2;
 
   if (a.type === 'placeBlock') {
-    const riverX = FIELD.W / 2 - 30;          // 仅自家半场（左侧）道路
-    if (x > riverX) return true;              // 点到对方半场 → 取消
-    const px = Math.max(SIDES.player.towerX + 30, Math.min(riverX, x));
+    const ownOK = side === 'player' ? x < mid : x > mid;   // 仅自家半场道路
+    if (!ownOK) return true;                                // 点到对方半场 → 取消
+    const px = side === 'player'
+      ? Math.max(SIDES.player.towerX + 30, Math.min(mid - 30, x))
+      : Math.min(SIDES.enemy.towerX - 30, Math.max(mid + 30, x));
     let lane = 0, ld = Infinity;
     for (const l of LANES) { const d = Math.abs(l.y - y); if (d < ld) { ld = d; lane = l.id; } }
-    const e = state.energy.player;
-    if (e.value >= a.cost) { e.value -= a.cost; spawnBlock(state, 'player', lane, px); }
+    const e = state.energy[side];
+    if (e.value >= a.cost) { e.value -= a.cost; spawnBlock(state, side, lane, px); }
     return true;
   }
   if (a.type === 'aimSniper') {
     const s = a.unit;
     if (s.state !== 'dead' && s.abilityTimer <= 0) {
       // 不能狙杀城楼/主楼上的人（法师、对方狙击手/投石机）
-      const tgt = nearestEnemyUnitToPoint(state, 'player', x, y, 90, ['mage', 'sniper', 'catapult']);
+      const tgt = nearestEnemyUnitToPoint(state, side, x, y, 90, ['mage', 'sniper', 'catapult']);
       if (tgt) {
         tgt.hp = 0; tgt.state = 'dead'; tgt.deathT = 0;
         s.abilityTimer = UNITS.sniper.ability.cd; s.attackAnim = 1;
         addEffect(state, { type: 'snipe', x: s.x, y: s.y - 12, tx: tgt.x, ty: tgt.y - 12, life: 0.25 });
         addEffect(state, { type: 'hit', x: tgt.x, y: tgt.y - 12, life: 0.35, big: true });
       } else {
-        state.pendingAction = a; // 没点到目标，保持瞄准
+        state.pending[side] = a; // 没点到目标，保持瞄准
       }
     }
     return true;
@@ -126,7 +145,7 @@ export function resolveTap(state, x, y) {
     if (c.state !== 'dead' && c.abilityTimer <= 0) {
       const cfg = UNITS.catapult;
       for (const o of state.units) {
-        if (o.state === 'dead' || o.side === 'player') continue;
+        if (o.state === 'dead' || o.side === side) continue;
         if (dist(x, y, o.x, o.y - 10) <= cfg.aoe) damageUnit(state, o, cfg.dmg, { kind: 'orb' });
       }
       c.abilityTimer = cfg.ability.cd; c.attackAnim = 1;
@@ -139,19 +158,22 @@ export function resolveTap(state, x, y) {
 }
 
 export function update(state, dt) {
-  if (state.over) { advanceEffects(state, dt); return; }
+  if (!state.started || state.over) { advanceEffects(state, dt); return; }
   state.time += dt;
   updateThreat(state);
 
-  // 玩家能量回复
-  const p = state.energy.player;
-  p.acc += dt;
-  while (p.acc >= ECONOMY.playerRegen && p.value < ECONOMY.max) {
-    p.acc -= ECONOMY.playerRegen;
-    p.value = Math.min(ECONOMY.max, p.value + 1);
+  // 能量回复：human 侧恒定速率；ai 侧由 updateAI 按威胁等级处理
+  for (const side of ['player', 'enemy']) {
+    if (state.controllers[side] === 'ai') continue;
+    const en = state.energy[side];
+    en.acc += dt;
+    while (en.acc >= ECONOMY.playerRegen && en.value < ECONOMY.max) {
+      en.acc -= ECONOMY.playerRegen;
+      en.value = Math.min(ECONOMY.max, en.value + 1);
+    }
   }
 
-  updateAI(state, dt);
+  if (state.controllers.enemy === 'ai') updateAI(state, dt);
   updateUnits(state, dt);
   updateBuildings(state, dt);
   updateProjectiles(state, dt);

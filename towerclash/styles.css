@@ -50,13 +50,31 @@ html, body {
 .dot.p { background: #4f9bff; }
 .dot.e { background: #c178f0; }
 
-/* ===== 底栏 ===== */
-.bottombar {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  display: flex; align-items: flex-end; gap: 14px;
+/* ===== HUD 条（底=玩家1，顶=玩家2；均正向） ===== */
+.hud {
+  position: absolute; left: 0; right: 0;
+  display: flex; gap: 14px;
+}
+.hud-bottom {
+  bottom: 0; align-items: flex-end;
   padding: 12px max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   background: linear-gradient(to top, rgba(8,10,16,0.78), rgba(8,10,16,0));
 }
+.hud-top {
+  top: 0; align-items: flex-start;
+  padding: max(52px, calc(env(safe-area-inset-top) + 46px)) max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+  background: linear-gradient(to bottom, rgba(8,10,16,0.78), rgba(8,10,16,0));
+}
+.hud-top .unit-btn .ub-tip { top: auto; bottom: -96px; } /* 顶部 HUD 的提示朝下 */
+.hud-hint {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  background: rgba(255,221,77,0.95); color: #2a2410; font-weight: 700; font-size: 14px;
+  padding: 6px 16px; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+  opacity: 0; pointer-events: none; white-space: nowrap; transition: opacity .12s;
+}
+.hud-bottom .hud-hint { bottom: calc(100% + 4px); }
+.hud-top .hud-hint { top: calc(100% + 4px); }
+.hud-hint.show { opacity: 1; }
 
 .lane-col { display: flex; flex-direction: column; gap: 6px; }
 .lane-label { font-size: 12px; color: #aeb6c5; text-align: center; }
@@ -159,11 +177,38 @@ html, body {
 .result-card h2.win { color: #ffd34d; }
 .result-card h2.lose { color: #e0556f; }
 .result-card p { color: #cfd6e2; margin-bottom: 22px; }
-#restart-btn {
+.result-btns { display: flex; gap: 12px; justify-content: center; }
+#restart-btn, .result-btns button {
   background: #ffd34d; color: #2a2410; border: none; border-radius: 10px;
-  padding: 12px 28px; font-size: 16px; font-weight: 700; cursor: pointer;
+  padding: 12px 24px; font-size: 16px; font-weight: 700; cursor: pointer;
 }
 #restart-btn:hover { background: #ffe07a; }
+.result-btns .ghost { background: rgba(255,255,255,0.1); color: #dde3ee; }
+.result-btns .ghost:hover { background: rgba(255,255,255,0.18); }
+
+/* ===== 开始菜单 ===== */
+.menu {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(6,8,14,0.82); backdrop-filter: blur(4px); z-index: 12;
+}
+.menu.hidden { display: none; }
+.menu-card {
+  background: linear-gradient(to bottom, #232838, #161a26);
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 20px;
+  padding: 36px 40px; text-align: center; box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+}
+.menu-card h1 { font-size: 26px; margin-bottom: 8px; color: #fff; }
+.menu-card p { color: #aeb6c5; margin-bottom: 24px; }
+.menu-btns { display: flex; flex-direction: column; gap: 12px; }
+.mode-btn {
+  background: linear-gradient(to bottom, #3a6fd0, #2f57b0); color: #fff;
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 12px;
+  padding: 16px 36px; font-size: 18px; font-weight: 700; cursor: pointer;
+  transition: transform .08s, filter .12s;
+}
+.mode-btn:hover { filter: brightness(1.12); transform: translateY(-2px); }
+.mode-btn:active { transform: translateY(0) scale(0.97); }
+#mode-pvp { background: linear-gradient(to bottom, #9d4bd0, #7a37a8); }
 
 .hint {
   position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);

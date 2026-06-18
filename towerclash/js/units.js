@@ -9,7 +9,8 @@ import {
 export function makeUnit(state, side, type, lane, opts = {}) {
   const cfg = UNITS[type];
   const dir = SIDES[side].dir;
-  const hpMul = side === 'enemy' ? state.threat.hpMul : 1;
+  const ai = !!(state.controllers && state.controllers[side] === 'ai'); // 仅 AI 侧吃威胁加成
+  const hpMul = ai ? state.threat.hpMul : 1;
 
   const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === lane && b.alive);
   let useLane = lane, x, baseY;
@@ -37,7 +38,7 @@ export function makeUnit(state, side, type, lane, opts = {}) {
     id: nextId(), side, type, cfg, lane: useLane, dir,
     x, y, baseY,
     hp: cfg.hp * hpMul, maxHp: cfg.hp * hpMul,
-    dmgMul: side === 'enemy' ? state.threat.dmgMul : 1,
+    dmgMul: ai ? state.threat.dmgMul : 1,
     state: 'march', target: null,
     atkTimer: 0, healTimer: cfg.heal ? cfg.heal.cd : 0,
     // 动画

@@ -22,38 +22,43 @@
           <span id="timer" class="timer">0:00</span>
           <span id="version" class="version"></span>
         </div>
-        <div class="legend"><span class="dot p"></span>玩家 &nbsp; <span class="dot e"></span>骷髅</div>
+        <div class="legend"><span class="dot p"></span><span id="legend-p">玩家</span> &nbsp; <span class="dot e"></span><span id="legend-e">骷髅</span></div>
       </div>
 
-      <!-- 底栏 -->
-      <div class="bottombar">
-        <div class="lane-col">
-          <div class="lane-label">出兵路</div>
-          <div id="lane-select" class="lane-select"></div>
-        </div>
-        <div class="energy">
-          <div id="energy-pips" class="pips"></div>
-          <div class="energy-num">⚡<span id="energy-num">5</span></div>
-        </div>
-        <div id="unit-buttons" class="unit-buttons"></div>
-      </div>
+      <!-- 玩家2 HUD（顶部，PvP 时显示，由 JS 填充） -->
+      <div id="hud-top" class="hud hud-top"></div>
+      <!-- 玩家1 HUD（底部，由 JS 填充） -->
+      <div id="hud-bottom" class="hud hud-bottom"></div>
 
       <!-- 解锁提示 -->
       <div id="toast" class="toast"></div>
-      <!-- 放置/瞄准提示 -->
-      <div id="aimhint" class="aimhint"></div>
+
+      <!-- 开始菜单 -->
+      <div id="menu" class="menu">
+        <div class="menu-card">
+          <h1>城楼大战 · Tower Clash ⚔️</h1>
+          <p>选择对战模式</p>
+          <div class="menu-btns">
+            <button id="mode-pve" class="mode-btn">👤 玩家 vs 电脑</button>
+            <button id="mode-pvp" class="mode-btn">👥 玩家 vs 玩家</button>
+          </div>
+        </div>
+      </div>
 
       <!-- 结算 -->
       <div id="result" class="result hidden">
         <div class="result-card">
           <h2 id="result-title">胜利</h2>
           <p id="result-sub"></p>
-          <button id="restart-btn">再来一局</button>
+          <div class="result-btns">
+            <button id="restart-btn">再来一局</button>
+            <button id="menu-btn" class="ghost">返回菜单</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <p class="hint">点城楼或下方“出兵路”选择路线，再点兵种出兵。键盘：1-4 出兵，↑/↓ 换路。</p>
+    <p class="hint">点城楼或“出兵路”选择路线，再点兵种出兵。键盘：1-9 出兵，↑/↓ 换路，Esc 取消瞄准。</p>
 
     <script type="module" src="js/main.js"></script>
   </body>

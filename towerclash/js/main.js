@@ -1,5 +1,5 @@
 // 入口：初始化画布、游戏状态、UI、输入；运行固定步长主循环
-import { createGame, update } from './game.js';
+import { createGame, update, startGame } from './game.js';
 import { draw, makeView } from './render.js';
 import { initUI } from './ui.js';
 import { initInput } from './input.js';
@@ -7,7 +7,7 @@ import { initInput } from './input.js';
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-let state = createGame();
+let state = createGame('pve');
 let view = makeView(canvas);
 const getView = () => view;
 
@@ -32,18 +32,29 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 resize();
 
-const ui = initUI(state, restart);
+const ui = initUI(state, { onStart, onRestart, onMenu });
 initInput(canvas, state, getView, ui);
 
-function restart() {
-  const sel = state.selectedLane;
-  const fresh = createGame();
-  fresh.selectedLane = sel;
-  // 就地替换字段，保持 state 引用不变（UI/input 已绑定该引用）
-  for (const k of Object.keys(state)) delete state[k];
-  Object.assign(state, fresh);
-  ui.reset();
+function onStart(mode) {     // 菜单选择模式 → 开始
+  startGame(state, mode);
+  ui.applyMode();
+  ui.hideResult();
+  ui.showMenu(false);
 }
+function onRestart() {        // 结算面板：再来一局（同模式）
+  startGame(state, state.mode);
+  ui.applyMode();
+  ui.hideResult();
+}
+function onMenu() {           // 结算面板：返回菜单
+  ui.hideResult();
+  state.started = false;
+  ui.showMenu(true);
+}
+
+// 初始：显示开始菜单
+ui.applyMode();
+ui.showMenu(true);
 
 // 固定步长模拟
 const STEP = 1 / 60;

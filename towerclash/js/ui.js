@@ -1,6 +1,6 @@
-// HUD：能量条、兵种按钮、路选择、顶栏、解锁提示、瞄准提示、结算面板
+// HUD：每侧一套（能量条/路选择/兵种按钮/瞄准提示）+ 共享顶栏/解锁提示/菜单/结算
 import { UNITS, UNIT_ORDER, LANES, ECONOMY, APP_VERSION } from './data/config.js';
-import { requestUnit, canAfford, playerHasSpecial } from './game.js';
+import { requestUnit, canAfford, hasSpecial } from './game.js';
 import { spawnPoint } from './combat.js';
 
 const PENDING_HINT = {
@@ -9,30 +9,32 @@ const PENDING_HINT = {
   aimCatapult: '点击要轰炸的地面位置',
 };
 
-export function initUI(state, onRestart) {
-  const el = {
-    threat: document.getElementById('threat'),
-    timer: document.getElementById('timer'),
-    pips: document.getElementById('energy-pips'),
-    energyNum: document.getElementById('energy-num'),
-    buttons: document.getElementById('unit-buttons'),
-    lanes: document.getElementById('lane-select'),
-    result: document.getElementById('result'),
-    resultTitle: document.getElementById('result-title'),
-    resultSub: document.getElementById('result-sub'),
-    restart: document.getElementById('restart-btn'),
-    toast: document.getElementById('toast'),
-    aimhint: document.getElementById('aimhint'),
-  };
+// 为某一侧在容器内构建一套 HUD，返回 { update, trySpawn }
+function createHud(state, side, container) {
+  container.innerHTML = `
+    <div class="hud-hint"></div>
+    <div class="lane-col">
+      <div class="lane-label">出兵路</div>
+      <div class="lane-select"></div>
+    </div>
+    <div class="energy">
+      <div class="pips"></div>
+      <div class="energy-num">⚡<span class="energy-val">5</span></div>
+    </div>
+    <div class="unit-buttons"></div>`;
 
-  // 能量格
+  const hintEl = container.querySelector('.hud-hint');
+  const laneSel = container.querySelector('.lane-select');
+  const pipsEl = container.querySelector('.pips');
+  const energyVal = container.querySelector('.energy-val');
+  const btnWrap = container.querySelector('.unit-buttons');
+
   for (let i = 0; i < ECONOMY.max; i++) {
     const pip = document.createElement('div');
     pip.className = 'pip';
-    el.pips.appendChild(pip);
+    pipsEl.appendChild(pip);
   }
 
-  // 兵种按钮
   const btnMap = {};
   for (const key of UNIT_ORDER) {
     const u = UNITS[key];
@@ -47,60 +49,41 @@ export function initUI(state, onRestart) {
       <span class="ub-lock">🔒<br>Lv.${u.unlock}</span>
       <span class="ub-cd"></span>`;
     btn.addEventListener('click', () => trySpawn(key));
-    el.buttons.appendChild(btn);
+    btnWrap.appendChild(btn);
     btnMap[key] = btn;
   }
 
-  // 路选择按钮
   const laneBtns = [];
   for (const lane of LANES) {
     const b = document.createElement('button');
     b.className = 'lane-btn';
     b.textContent = lane.name + '路';
-    b.addEventListener('click', () => { if (spawnPoint(state, 'player', lane.id)) state.selectedLane = lane.id; });
-    el.lanes.appendChild(b);
+    b.addEventListener('click', () => { if (spawnPoint(state, side, lane.id)) state.selected[side] = lane.id; });
+    laneSel.appendChild(b);
     laneBtns.push(b);
   }
 
-  el.restart.addEventListener('click', onRestart);
-
-  const verEl = document.getElementById('version');
-  if (verEl) verEl.textContent = 'v' + APP_VERSION;
-
-  function showToast(msg) {
-    if (!el.toast) return;
-    el.toast.textContent = msg;
-    el.toast.classList.remove('show');
-    void el.toast.offsetWidth;
-    el.toast.classList.add('show');
-  }
-  let prevLv = state.threat.lv;
-
   function trySpawn(key) {
     const btn = btnMap[key];
-    const res = requestUnit(state, key);
+    const res = requestUnit(state, side, key);
     if (res === 'ok' || res === 'built' || res === 'pending') {
-      btn.classList.add('flash');
-      setTimeout(() => btn.classList.remove('flash'), 150);
+      btn.classList.add('flash'); setTimeout(() => btn.classList.remove('flash'), 150);
     } else {
-      btn.classList.add('shake');
-      setTimeout(() => btn.classList.remove('shake'), 250);
+      btn.classList.add('shake'); setTimeout(() => btn.classList.remove('shake'), 250);
     }
   }
 
   function update() {
-    const e = state.energy.player;
-    const pips = el.pips.children;
-    for (let i = 0; i < pips.length; i++) pips[i].classList.toggle('on', i < e.value);
-    el.energyNum.textContent = e.value;
+    const e = state.energy[side];
+    for (let i = 0; i < pipsEl.children.length; i++) pipsEl.children[i].classList.toggle('on', i < e.value);
+    energyVal.textContent = e.value;
 
-    // 选中路若不可出兵则自动换路
-    if (!spawnPoint(state, 'player', state.selectedLane)) {
-      const v = [0, 1, 2].find(i => spawnPoint(state, 'player', i));
-      if (v !== undefined) state.selectedLane = v;
+    if (!spawnPoint(state, side, state.selected[side])) {
+      const v = [0, 1, 2].find(i => spawnPoint(state, side, i));
+      if (v !== undefined) state.selected[side] = v;
     }
-    const tower = state.buildings.find(b => b.side === 'player' && b.kind === 'tower' && b.lane === state.selectedLane && b.alive);
-    const sp = spawnPoint(state, 'player', state.selectedLane);
+    const tower = state.buildings.find(b => b.side === side && b.kind === 'tower' && b.lane === state.selected[side] && b.alive);
+    const sp = spawnPoint(state, side, state.selected[side]);
 
     for (const key of UNIT_ORDER) {
       const u = UNITS[key];
@@ -109,19 +92,17 @@ export function initUI(state, onRestart) {
       let disabled = locked, ready = false, cdText = '';
       if (!locked) {
         if (key === 'sniper' || key === 'catapult') {
-          const ex = playerHasSpecial(state, key);
+          const ex = hasSpecial(state, side, key);
           if (ex) {
             if (ex.abilityTimer > 0) { disabled = true; cdText = Math.ceil(ex.abilityTimer) + 's'; }
             else { ready = true; cdText = '就绪'; }
-          } else {
-            disabled = !canAfford(state, key);
-          }
+          } else disabled = !canAfford(state, side, key);
         } else if (key === 'mage') {
-          disabled = !canAfford(state, key) || !tower || (tower.mage && tower.mage.state !== 'dead');
+          disabled = !canAfford(state, side, key) || !tower || (tower.mage && tower.mage.state !== 'dead');
         } else if (key === 'block') {
-          disabled = !canAfford(state, key);
+          disabled = !canAfford(state, side, key);
         } else {
-          disabled = !canAfford(state, key) || !sp;
+          disabled = !canAfford(state, side, key) || !sp;
         }
       }
       btn.classList.toggle('locked', locked);
@@ -132,43 +113,98 @@ export function initUI(state, onRestart) {
     }
 
     laneBtns.forEach((b, i) => {
-      b.classList.toggle('active', i === state.selectedLane);
-      b.classList.toggle('disabled', !spawnPoint(state, 'player', i));
+      b.classList.toggle('active', i === state.selected[side]);
+      b.classList.toggle('disabled', !spawnPoint(state, side, i));
     });
 
-    el.threat.textContent = '威胁 Lv.' + state.threat.lv;
+    const a = state.pending[side];
+    const hint = a ? PENDING_HINT[a.type] : '';
+    hintEl.textContent = hint || '';
+    hintEl.classList.toggle('show', !!hint);
+  }
+
+  return { update, trySpawn };
+}
+
+export function initUI(state, handlers) {
+  const el = {
+    threat: document.getElementById('threat'),
+    timer: document.getElementById('timer'),
+    legendE: document.getElementById('legend-e'),
+    legendP: document.getElementById('legend-p'),
+    toast: document.getElementById('toast'),
+    result: document.getElementById('result'),
+    resultTitle: document.getElementById('result-title'),
+    resultSub: document.getElementById('result-sub'),
+    restart: document.getElementById('restart-btn'),
+    menuBtn: document.getElementById('menu-btn'),
+    menu: document.getElementById('menu'),
+    pve: document.getElementById('mode-pve'),
+    pvp: document.getElementById('mode-pvp'),
+    hudTop: document.getElementById('hud-top'),
+  };
+  const verEl = document.getElementById('version');
+  if (verEl) verEl.textContent = 'v' + APP_VERSION;
+
+  el.pve.addEventListener('click', () => handlers.onStart('pve'));
+  el.pvp.addEventListener('click', () => handlers.onStart('pvp'));
+  el.restart.addEventListener('click', () => handlers.onRestart());
+  el.menuBtn.addEventListener('click', () => handlers.onMenu());
+
+  const hudBottom = createHud(state, 'player', document.getElementById('hud-bottom'));
+  const hudTop = createHud(state, 'enemy', document.getElementById('hud-top'));
+
+  let prevLv = state.threat.lv;
+  function showToast(msg) {
+    if (!el.toast) return;
+    el.toast.textContent = msg;
+    el.toast.classList.remove('show');
+    void el.toast.offsetWidth;
+    el.toast.classList.add('show');
+  }
+
+  function updateShared() {
+    const pvp = state.mode === 'pvp';
+    el.threat.textContent = (pvp ? '等级 Lv.' : '威胁 Lv.') + state.threat.lv;
     const m = Math.floor(state.time / 60), s = Math.floor(state.time % 60);
     el.timer.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    el.legendE.textContent = pvp ? '玩家2' : '骷髅';
+    el.legendP.textContent = pvp ? '玩家1' : '玩家';
 
-    // 升级解锁提示
-    if (state.threat.lv > prevLv) {
+    if (state.started && state.threat.lv > prevLv) {
       for (const key of UNIT_ORDER) {
         if (UNITS[key].unlock === state.threat.lv) showToast('🔓 解锁新兵种：' + UNITS[key].name + '！');
       }
     }
     prevLv = state.threat.lv;
 
-    // 放置/瞄准提示
-    if (el.aimhint) {
-      const hint = state.pendingAction ? PENDING_HINT[state.pendingAction.type] : '';
-      el.aimhint.textContent = hint || '';
-      el.aimhint.classList.toggle('show', !!hint);
-    }
-
     if (state.over && el.result.classList.contains('hidden')) {
       el.result.classList.remove('hidden');
-      const win = state.result === 'win';
-      el.resultTitle.textContent = win ? '🏆 胜利！' : '💀 战败';
-      el.resultTitle.className = win ? 'win' : 'lose';
-      el.resultSub.textContent = win ? '骷髅主楼被摧毁，王国守住了！' : '主楼陷落……骷髅大军攻破了王城。';
+      const win = state.result === 'win'; // 敌(右)主楼倒
+      if (pvp) {
+        el.resultTitle.textContent = win ? '🏆 玩家1 胜利！' : '🏆 玩家2 胜利！';
+        el.resultTitle.className = 'win';
+        el.resultSub.textContent = win ? '玩家2 的主楼被摧毁！' : '玩家1 的主楼被摧毁！';
+      } else {
+        el.resultTitle.textContent = win ? '🏆 胜利！' : '💀 战败';
+        el.resultTitle.className = win ? 'win' : 'lose';
+        el.resultSub.textContent = win ? '骷髅主楼被摧毁，王国守住了！' : '主楼陷落……骷髅大军攻破了王城。';
+      }
     }
   }
 
-  function reset() {
-    el.result.classList.add('hidden');
-    if (el.aimhint) el.aimhint.classList.remove('show');
-    prevLv = state.threat.lv;
+  function update() {
+    hudBottom.update();
+    if (state.mode === 'pvp') hudTop.update();
+    updateShared();
   }
 
-  return { update, reset, trySpawn };
+  function applyMode() {
+    el.hudTop.style.display = state.mode === 'pvp' ? '' : 'none';
+  }
+
+  function showMenu(show) { el.menu.classList.toggle('hidden', !show); }
+  function hideResult() { el.result.classList.add('hidden'); prevLv = state.threat.lv; }
+
+  return { update, applyMode, showMenu, hideResult, trySpawnPlayer: hudBottom.trySpawn };
 }

@@ -34,13 +34,17 @@ export function draw(ctx, state, view) {
   drawLanes(ctx, state);
   drawSelection(ctx, state);
 
-  // 放置路障时，高亮自家半场可放置的道路区域
-  if (state.pendingAction && state.pendingAction.type === 'placeBlock') {
+  // 放置路障时，高亮该侧自家半场可放置的道路区域
+  const mid = FIELD.W / 2;
+  for (const side of ['player', 'enemy']) {
+    if (state.controllers[side] !== 'human') continue;
+    const p = state.pending[side];
+    if (!p || p.type !== 'placeBlock') continue;
     ctx.save();
     ctx.fillStyle = 'rgba(80,220,120,0.14)';
-    const riverX = FIELD.W / 2 - 30;
     for (const l of LANES) {
-      ctx.fillRect(SIDES.player.towerX, l.y - 22 * l.scale, riverX - SIDES.player.towerX, 44 * l.scale);
+      if (side === 'player') ctx.fillRect(SIDES.player.towerX, l.y - 22 * l.scale, (mid - 30) - SIDES.player.towerX, 44 * l.scale);
+      else ctx.fillRect(mid + 30, l.y - 22 * l.scale, SIDES.enemy.towerX - (mid + 30), 44 * l.scale);
     }
     ctx.restore();
   }
@@ -122,33 +126,36 @@ function drawLanes(ctx, state) {
 
 function drawSelection(ctx, state) {
   const pulse = 0.5 + Math.sin(state.time * 4) * 0.2;
-  // 高亮存活的玩家城楼（可点击）
-  for (const b of state.buildings) {
-    if (b.side !== 'player' || b.kind !== 'tower' || !b.alive) continue;
-    if (b.lane === state.selectedLane) continue;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(b.x, b.y + 6, 30, 10, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-  // 出兵标记：画在当前有效出兵点（存活城楼；三城楼全毁时为主楼）
-  const sp = spawnPoint(state, 'player', state.selectedLane);
-  if (sp) {
-    const ly = LANES[sp.lane].y;
-    ctx.save();
-    ctx.strokeStyle = `rgba(255,221,77,${pulse})`;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.ellipse(sp.x, ly + 6, 30, 10, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(255,221,77,${pulse})`;
-    ctx.font = 'bold 16px DM Sans, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(sp.fromKeep ? '▼ 主楼出兵' : '▼ 出兵', sp.x, ly - (sp.fromKeep ? 130 : 96));
-    ctx.restore();
+  for (const side of ['player', 'enemy']) {
+    if (state.controllers[side] !== 'human') continue;
+    // 非选中的存活城楼：淡描边
+    for (const b of state.buildings) {
+      if (b.side !== side || b.kind !== 'tower' || !b.alive) continue;
+      if (b.lane === state.selected[side]) continue;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y + 6, 30, 10, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // 出兵标记：当前有效出兵点（存活城楼；三城楼全毁时为主楼）
+    const sp = spawnPoint(state, side, state.selected[side]);
+    if (sp) {
+      const ly = LANES[sp.lane].y;
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,221,77,${pulse})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(sp.x, ly + 6, 30, 10, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255,221,77,${pulse})`;
+      ctx.font = 'bold 16px DM Sans, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(sp.fromKeep ? '▼ 主楼出兵' : '▼ 出兵', sp.x, ly - (sp.fromKeep ? 130 : 96));
+      ctx.restore();
+    }
   }
 }
 
