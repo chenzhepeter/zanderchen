@@ -88,6 +88,8 @@ export function requestUnit(state, side, type) {
     state.pending[side] = { type: 'placeBlock', cost: cfg.cost };
     return 'pending';
   }
+  // 选了其它兵种 → 取消未完成的"放置路障"意图，避免下一次点击误放路障
+  state.pending[side] = null;
   if (type === 'sniper' || type === 'catapult') {
     if (hasSpecial(state, side, type)) return 'cd'; // 已建造，自动寻敌开火，无需操作
     if (e.value < cfg.cost) return 'poor';
