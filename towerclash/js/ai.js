@@ -115,10 +115,10 @@ export function aiStep(state, side, dt) {
   const rush = oppTowerHp[lane] === 0;
   if (e.value < ATTACK_MIN && !rush) return;
 
-  // 该路有己方拒马 → 只在其后布置弓兵（可越障射击；近战/炮会被自家拒马卡住）
+  // 该路有己方拒马 → 只在其后布置远程兵（弓兵/炮手的箭与炮弹可越障攻击被卡住的敌人；近战会被自家拒马挡住）
   if (blocksOnLane(state, side, lane) > 0) {
-    if (aff('archer')) doSpawn(state, side, 'archer', lane);
-    if (aff('archer')) doSpawn(state, side, 'archer', lane);
+    if (aff('cannon')) doSpawn(state, side, 'cannon', lane); // 炮手抛射越障 + 范围杀伤聚集在拒马前的敌群
+    if (aff('archer')) doSpawn(state, side, 'archer', lane); // 弓兵越障射击
     return;
   }
 
