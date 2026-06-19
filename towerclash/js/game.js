@@ -165,6 +165,7 @@ function updateProjectiles(state, dt) {
         if (dist(pr.x, pr.y, o.x, o.y - 12) < 22) {
           pr.hitSet.add(o.id);
           damageUnit(state, o, pr.dmg, { kind: pr.kind });
+          if (pr.hitSet.size >= (pr.pierceMax || 3)) { pr.dead = true; break; } // 最多贯穿命中数
         }
       }
       if (pr.t > pr.life || pr.x < -50 || pr.x > 1330) pr.dead = true;

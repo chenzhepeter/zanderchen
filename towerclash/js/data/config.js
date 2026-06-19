@@ -2,7 +2,7 @@
 // 所有坐标都基于虚拟分辨率 FIELD（渲染时再等比缩放到画布）
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.6.19.3';
+export const APP_VERSION = '2026.6.19.4';
 
 export const FIELD = { W: 1280, H: 720 };
 
@@ -40,8 +40,8 @@ export const UNITS = {
     key: 'archer', name: '弓兵', icon: '🏹', cost: 3, unlock: 2,
     hp: 80, dmg: 23, atkCd: 0.9, range: 232, speed: 58, aggro: 268,
     squad: 2, kind: 'ranged', proj: 'arrow', projSpeed: 460, radius: 12,
-    skill: '穿透箭：每第3箭贯穿直线上的多个敌人',
-    pierceEvery: 3,
+    skill: '穿透箭：每第3箭可贯穿，最多命中3名敌人',
+    pierceEvery: 3, pierceMax: 3,
   },
   knight: {
     key: 'knight', name: '骑士', icon: '⚔️', cost: 5, unlock: 3,

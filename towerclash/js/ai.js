@@ -115,6 +115,13 @@ export function aiStep(state, side, dt) {
   const rush = oppTowerHp[lane] === 0;
   if (e.value < ATTACK_MIN && !rush) return;
 
+  // 该路有己方拒马 → 只在其后布置弓兵（可越障射击；近战/炮会被自家拒马卡住）
+  if (blocksOnLane(state, side, lane) > 0) {
+    if (aff('archer')) doSpawn(state, side, 'archer', lane);
+    if (aff('archer')) doSpawn(state, side, 'archer', lane);
+    return;
+  }
+
   // ===== 组波（多兵种协同）：前排 + 攻坚炮(破塔) + 后排输出；防守时前排换克制兵 =====
   const front = defending
     ? defenderFor(comp, aff, mageOnLane, lane)

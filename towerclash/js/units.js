@@ -205,7 +205,8 @@ function doAttack(state, u, target, isBuilding) {
     dmg *= u.cfg.charge.mult;
     u.charging = false;
     u.chargeUsed = true;
-    if (!isBuilding && target.state !== 'dead') {
+    // 仅击退可移动单位；路障/驻塔法师/狙击/投石等固定目标不被推动（避免"位置突然后退"）
+    if (!isBuilding && target.state !== 'dead' && (target.cfg.speed || 0) > 0) {
       target.x += u.dir * u.cfg.charge.knockback;
       addEffect(state, { type: 'hit', x: target.x, y: target.y - 14, life: 0.3, big: true });
     }
@@ -250,7 +251,7 @@ function fireArrow(state, u, target, dmg, isBuilding) {
     spawnProjectile(state, {
       kind: 'arrow', side: u.side, x: u.x, y: u.y - 14,
       vx: dx / len * u.cfg.projSpeed, vy: dy / len * u.cfg.projSpeed, dmg, pierce: true,
-      hitSet: new Set(), life: 1.4, lane: u.lane,
+      hitSet: new Set(), pierceMax: u.cfg.pierceMax || 3, life: 1.4, lane: u.lane,
     });
     addFloatText(state, u.x, u.y - 30, '穿透!', '#aef');
   } else {
