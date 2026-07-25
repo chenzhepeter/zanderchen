@@ -138,14 +138,24 @@ export function advanceDay() {
   if (v) v.days++;
 
   // 补给消耗（每 20 名船员每天各耗 1 单位）
+  //  · 淡水：到港自动补满（免费），海上逐日消耗
+  //  · 粮食：就是货舱里的「粮食」货物，需在市场购买
+  // 只在海上消耗：靠港期间船员在岸上吃住，不啃船上的存粮
   const rate = Math.max(1, Math.round(crew / 20));
-  state.supplies.food = Math.max(0, state.supplies.food - rate);
-  state.supplies.water = Math.max(0, state.supplies.water - rate);
-  if (state.supplies.food <= 0 || state.supplies.water <= 0) {
-    state.crewMorale -= 6;
-    res.events.push({ type: 'starve', msg: '补给见底，船员开始怨声载道。' });
+  if (!state.atPort) {
+    state.supplies.water = Math.max(0, state.supplies.water - rate);
+    const ate = eatGrain(rate);
+    if (ate < rate || state.supplies.water <= 0) {
+      state.crewMorale -= 6;
+      res.events.push({
+        type: 'starve',
+        msg: ate < rate ? '粮食吃光了，船员开始啃缆绳上的皮革。' : '淡水见底，喉咙里像塞了沙子。',
+      });
+    } else if (state.crewMorale < 100) {
+      state.crewMorale = Math.min(100, state.crewMorale + 0.5);
+    }
   } else if (state.crewMorale < 100) {
-    state.crewMorale = Math.min(100, state.crewMorale + 0.5);
+    state.crewMorale = Math.min(100, state.crewMorale + 1.5);   // 靠港休整，士气回升更快
   }
   state.crewMorale = Math.max(0, Math.min(100, state.crewMorale));
 
@@ -191,6 +201,8 @@ export function advanceDay() {
     state.position = { lng: p.lng, lat: p.lat };
     state.atPort = p.id;
     state.voyage = null;
+    refillWater();
+    res.events.push({ type: 'water', msg: '靠港补足了淡水。' });
     if (!state.discovered.includes(p.id)) {
       state.discovered.push(p.id);
       res.events.push({ type: 'discover', msg: `发现新港口：${p.name}！` });
@@ -205,6 +217,32 @@ export function advanceDay() {
   const p = 0.06 + sea.danger * 0.035;
   if (Math.random() < p) res.encounter = rollEncounter(sea);
   return res;
+}
+
+// 淡水按船员规模自动补满（靠港免费）
+export function waterCapacity() {
+  return Math.max(60, fleetCrew() * 3);
+}
+export function refillWater() {
+  state.supplies.water = waterCapacity();
+}
+
+// 从货舱吃掉粮食，返回实际吃到的数量
+function eatGrain(need) {
+  let left = need;
+  for (const s of state.fleet) {
+    const have = s.cargo.grain || 0;
+    if (!have) continue;
+    const take = Math.min(have, left);
+    s.cargo.grain = have - take;
+    if (!s.cargo.grain) delete s.cargo.grain;
+    left -= take;
+    if (left <= 0) break;
+  }
+  return need - left;
+}
+export function grainOnBoard() {
+  return state.fleet.reduce((a, s) => a + (s.cargo.grain || 0), 0);
 }
 
 function courseNow() {

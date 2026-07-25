@@ -6,7 +6,7 @@ import { PORTS } from './data/ports.js';
 import { GOODS } from './data/goods.js';
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.7.25.1';
+export const APP_VERSION = '2026.7.25.2';
 export const SAVE_VERSION = 1;
 export const STORAGE_KEY = 'blackbeard.save';
 export const SLOT_KEY = (i) => `blackbeard.slot.${i}`;
@@ -33,11 +33,12 @@ export const state = {
   fleet: [],
   flagship: 0,             // fleet 索引
   crewMorale: 70,
-  supplies: { food: 60, water: 60 },
+  supplies: { water: 60 },  // 粮食改为货舱里的 grain 货物；淡水靠港免费补满
   position: { lng: -2.59, lat: 51.45 },
   atPort: 'BRISTOL',
   voyage: null,            // { path:[{lng,lat}], idx, destId, days }
   officers: [],            // 已招募 officer id
+  quests: null,            // { active:[{id,since}], done:[id], counters:{} }
   flags: {},               // 剧情旗标
   discovered: ['BRISTOL'],
   portState: {},           // portId -> { stock: {goodId: qty}, mod: {goodId: 倍率} }
@@ -109,11 +110,12 @@ export function initNewGame() {
     fleet: [],
     flagship: 0,
     crewMorale: 70,
-    supplies: { food: 60, water: 60 },
+    supplies: { water: 60 },
     position: { lng: -2.59, lat: 51.45 },
     atPort: 'BRISTOL',
     voyage: null,
     officers: [],
+    quests: { active: [], done: [], counters: { wins: 0, winsMerchant: 0, winsPatrol: 0 } },
     flags: {},
     discovered: ['BRISTOL'],
     portState: {},
@@ -126,7 +128,9 @@ export function initNewGame() {
     ending: null,
   });
   shipUid = 1; logUid = 1;
-  state.fleet.push(makeShip('skiff', '海雀号'));
+  const first = makeShip('skiff', '海雀号');
+  first.cargo.grain = 20;          // 开局给一点口粮，之后要自己在市场买
+  state.fleet.push(first);
   seedPortStates();
   addLog('1697 年 5 月，布里斯托尔。你在艾冯河的码头上签了字，成为一名水手。');
 }
@@ -156,7 +160,7 @@ function buildPayload() {
       date: state.date, chapter: state.chapter, player: state.player,
       fleet: state.fleet, flagship: state.flagship, crewMorale: state.crewMorale,
       supplies: state.supplies, position: state.position, atPort: state.atPort,
-      voyage: state.voyage, officers: state.officers, flags: state.flags,
+      voyage: state.voyage, officers: state.officers, quests: state.quests, flags: state.flags,
       discovered: state.discovered, portState: state.portState,
       activeEffects: state.activeEffects, eventLog: state.eventLog,
       pendingEvent: state.pendingEvent, pendingDialog: state.pendingDialog,

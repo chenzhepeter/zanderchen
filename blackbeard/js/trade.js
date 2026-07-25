@@ -106,12 +106,4 @@ export function monthlyMarketDrift() {
   }
 }
 
-// 补给（粮食/淡水）单独计价，不占货舱
-export function buySupplies(portId, kind, qty) {
-  const unit = kind === 'food' ? 6 : 4;
-  const cost = qty * unit;
-  if (state.player.gold < cost) return { ok: false, msg: '金币不足。' };
-  state.player.gold -= cost;
-  state.supplies[kind] = Math.min(400, state.supplies[kind] + qty);
-  return { ok: true, msg: `补充${kind === 'food' ? '粮食' : '淡水'} ${qty} 单位，付出 ${cost} 金币。` };
-}
+// 淡水靠港免费补满（见 voyage.refillWater）；粮食请在市场购买「粮食」货物。

@@ -11,8 +11,16 @@ import { SHIPS, SHIP_BY_ID, UPGRADES } from './data/ships.js';
 import { OFFICERS, OFFICER_BY_ID } from './data/officers.js';
 import { initMap, drawPorts, drawRoute, clearRoute, setShip, zoomTo, pingAt } from './worldmap.js';
 import { startVoyage, abortVoyage, advanceDay, planRoute, routeDistanceNm, dateStr } from './voyage.js';
-import { marketList, buy, sell, buySupplies, fleetCargoTotal, fleetCargoSpace, monthlyMarketDrift } from './trade.js';
+import { marketList, buy, sell, fleetCargoTotal, fleetCargoSpace, monthlyMarketDrift } from './trade.js';
 import { windAt, bearing, distanceNm } from './geo.js';
+import { openTown, closeTown, refreshTown } from './town.js';
+import {
+  ensureQuests, syncMainQuests, checkAll, accept, offersAt, activeQuests, doneQuests,
+  progressText, isActive, isDone, onBattleWin, onTalk,
+} from './quests.js';
+import { QUEST_BY_ID } from './data/quests.js';
+import { STORY_NPCS } from './data/npcs.js';
+import { waterCapacity, refillWater, grainOnBoard } from './voyage.js';
 import { onDayAdvanced, tryChapter, describeChapter, offerPardon, finalChoices, grantQAR } from './story.js';
 import { startBattle } from './battle.js';
 
@@ -71,6 +79,7 @@ export function boot() {
   });
   $('#btn-slots').addEventListener('click', () => showSlots('load'));
   $('#btn-continue').disabled = !hasSave();
+  $('#town-leave').addEventListener('click', () => { closeTown(); panel = 'port'; render(); });
   showStart();
 }
 
@@ -87,6 +96,8 @@ export function showGame() {
     initMap($('#chart'), { onPortClick: onPortClick, onSeaClick: () => {} });
     mapReady = true;
   }
+  ensureQuests();
+  syncMainQuests();
   drawPorts(state);
   refreshMap();
   panel = state.atPort ? 'port' : 'map';
@@ -111,6 +122,7 @@ function renderHud() {
   const p = state.player;
   const w = windAt(state.position.lng, state.position.lat, state.date.m);
   const where = state.atPort ? PORT_BY_ID[state.atPort].name : (state.voyage ? '航行中' : '海上');
+  const grain = grainOnBoard();
   $('#hud').innerHTML = `
     <div class="hud-row">
       <span class="hud-date">📅 ${dateStr()}</span>
@@ -121,7 +133,8 @@ function renderHud() {
       <span title="官方声望">🎖️ 声望 ${p.fame}</span>
       <span title="海盗恶名">🏴‍☠️ 恶名 ${p.infamy}</span>
       <span title="船员士气">😐 士气 ${Math.round(state.crewMorale)}</span>
-      <span title="粮食 / 淡水">🍖 ${state.supplies.food} 💧 ${state.supplies.water}</span>
+      <span title="粮食（货舱里的粮食货物）"${grain <= 0 ? ' style="color:#ff9a8a"' : ''}>🌾 ${grain}</span>
+      <span title="淡水（靠港免费补满）">💧 ${state.supplies.water}</span>
       <span title="风向">🌬️ ${w.name}</span>
     </div>`;
 }
@@ -132,7 +145,9 @@ function navBtn(id, label) {
 
 function renderPanel() {
   const atPort = state.atPort ? PORT_BY_ID[state.atPort] : null;
-  let nav = navBtn('map', '🗺️ 海图') + navBtn('fleet', '⚓ 舰队') + navBtn('log', '📜 航海日志');
+  const nQ = activeQuests().length;
+  let nav = navBtn('map', '🗺️ 海图') + navBtn('quests', `📋 任务${nQ ? ` (${nQ})` : ''}`)
+    + navBtn('fleet', '⚓ 舰队') + navBtn('log', '📜 日志');
   if (atPort) {
     nav = navBtn('port', '🏛️ ' + atPort.name) + nav;
   }
@@ -145,6 +160,7 @@ function renderPanel() {
   else if (panel === 'governor') body = renderGovernor(atPort);
   else if (panel === 'church') body = renderChurch(atPort);
   else if (panel === 'fleet') body = renderFleet();
+  else if (panel === 'quests') body = renderQuests();
   else if (panel === 'log') body = renderLog();
 
   $('#panel').innerHTML = `<div class="panel-nav">${nav}
@@ -196,13 +212,37 @@ function renderMapPanel() {
 
 function renderSupplyCard() {
   const crew = fleetCrew();
-  const days = Math.floor(Math.min(state.supplies.food, state.supplies.water) / Math.max(1, Math.round(crew / 20)));
+  const rate = Math.max(1, Math.round(crew / 20));
+  const grain = grainOnBoard();
+  const days = Math.floor(Math.min(grain, state.supplies.water) / rate);
+  const cap = waterCapacity();
   return `<div class="card">
     <h3>补给</h3>
-    <p>船员 ${crew} 人 · 按当前消耗还够 <b>${days}</b> 天</p>
-    <div class="bar"><i style="width:${Math.min(100, state.supplies.food / 2)}%"></i></div>
-    <p class="muted small">🍖 粮食 ${state.supplies.food} ／ 💧 淡水 ${state.supplies.water}</p>
+    <p>船员 ${crew} 人 · 每天消耗 ${rate} 粮 ${rate} 水 · 还够 <b>${days}</b> 天</p>
+    <p class="small">🌾 粮食 <b${grain <= 0 ? ' class="bad"' : ''}>${grain}</b>
+      <span class="muted">（在市场购买"粮食"货物，占货舱）</span></p>
+    <div class="bar"><i style="width:${Math.min(100, state.supplies.water / cap * 100)}%"></i></div>
+    <p class="small muted">💧 淡水 ${state.supplies.water}/${cap}（靠港自动补满，免费）</p>
+    ${state.atPort ? '<div class="btn-row"><button class="ghost-btn" data-act="water">💧 补满淡水</button></div>' : ''}
   </div>`;
+}
+
+// ===== 任务日志 =====
+function renderQuests() {
+  const act = activeQuests(), done = doneQuests();
+  const card = (q, isDoneQ) => `
+    <div class="quest${isDoneQ ? ' qdone' : ''}">
+      <div class="qhead"><span class="qkind ${q.kind}">${q.kind === 'main' ? '主线' : '支线'}</span>
+        <b>${q.title}</b>${isDoneQ ? ' ✅' : ''}</div>
+      <p class="small" style="margin-top:5px">${escapeHtml(q.desc)}</p>
+      ${isDoneQ ? (q.doneText ? `<p class="qprog">「${escapeHtml(q.doneText)}」</p>` : '')
+      : `<div class="qprog">${progressText(q)}</div>`}
+    </div>`;
+  return `<div class="card">
+      <h3>📋 进行中（${act.length}）</h3>
+      ${act.length ? act.map(q => card(q, false)).join('') : '<p class="muted small">暂无任务。去城镇里找人聊聊——头顶有 <b>!</b> 的人有活儿给你。</p>'}
+    </div>
+    ${done.length ? `<div class="card"><h3>✅ 已完成（${done.length}）</h3>${done.map(q => card(q, true)).join('')}</div>` : ''}`;
 }
 
 function renderPortPanel(p) {
@@ -216,7 +256,13 @@ function renderPortPanel(p) {
     church: ['⛪ 医馆', 'church'],
   };
   const btns = p.facilities.map(f => `<button class="fac-btn" data-panel="${fac[f][1]}">${fac[f][0]}</button>`).join('');
-  return `<div class="card port-head">
+  const offers = offersAt(p.id).length;
+  return `<div class="card">
+      <h3>🏘️ 上岸走走</h3>
+      <p class="muted small">在${p.name}的街区里散步：和人交谈、逛设施。${offers ? `<b class="good">这里有 ${offers} 个委托在等人接。</b>` : ''}</p>
+      <div class="btn-row"><button class="primary-btn" data-act="town">🚶 进入城镇</button></div>
+    </div>
+    <div class="card port-head">
       <h3>${p.name} <span class="muted">${p.nameEn}</span></h3>
       <p class="tags"><span class="tag">${n.flag} ${n.name}</span>
         <span class="tag">规模 ${'★'.repeat(p.size)}</span>
@@ -270,11 +316,8 @@ function renderMarket(p) {
     <p class="muted small">舱位剩余 ${fleetCargoSpace()} ／ 金币 ${fmt(state.player.gold)}</p>
     <table class="tbl"><thead><tr><th>货物</th><th>买入</th><th>卖出</th><th>库存</th><th>持有</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>
-    <h3 style="margin-top:14px">补给</h3>
-    <div class="btn-row">
-      <button class="ghost-btn" data-sup="food" data-q="30">🍖 粮食 ×30（180）</button>
-      <button class="ghost-btn" data-sup="water" data-q="30">💧 淡水 ×30（120）</button>
-    </div>
+    <p class="small muted" style="margin-top:10px">🌾 <b>粮食就是船上的口粮</b>：每天按船员数消耗，断粮士气会暴跌。
+      💧 淡水靠港免费补满，不占货舱。</p>
   </div>`;
 }
 
@@ -285,10 +328,18 @@ function renderTavern(p) {
     && !state.officers.includes(o.id));
   const hired = state.officers.map(id => OFFICER_BY_ID[id]).filter(Boolean);
   const rumor = rumorFor(p);
+  const offers = offersAt(p.id);
   return `<div class="card">
       <h3>🍺 ${p.name} · 酒馆</h3>
       <p class="blurb">${rumor}</p>
     </div>
+    ${offers.length ? `<div class="card"><h3>📌 委托板</h3>
+      ${offers.map(q => `<div class="quest">
+        <div class="qhead"><span class="qkind side">支线</span><b>${q.title}</b></div>
+        <p class="small" style="margin-top:5px">${escapeHtml(q.desc)}</p>
+        <p class="small muted">委托人：${q.giverName || '本地人'}　·　报酬 ${q.reward?.gold || 0} 金币</p>
+        <button class="primary-btn" data-quest="${q.id}">接下委托</button>
+      </div>`).join('')}</div>` : ''}
     <div class="card"><h3>招募船员</h3>
       <p class="muted small">当前船员 ${fleetCrew()} 人，士气 ${Math.round(state.crewMorale)}</p>
       <div class="btn-row">
@@ -420,16 +471,17 @@ function attachPanel() {
   $$('[data-panel]').forEach(b => b.addEventListener('click', () => { panel = b.dataset.panel; render(); }));
   $$('[data-sail]').forEach(b => b.addEventListener('click', () => doSail(b.dataset.sail)));
   $$('[data-buy]').forEach(b => b.addEventListener('click', () => {
-    const r = buy(state.atPort, b.dataset.buy, +b.dataset.q); toast(r.msg); saveGame(); render();
+    const r = buy(state.atPort, b.dataset.buy, +b.dataset.q); toast(r.msg); saveGame(); afterQuestTick();
   }));
   $$('[data-sell]').forEach(b => b.addEventListener('click', () => {
-    const r = sell(state.atPort, b.dataset.sell, +b.dataset.q); toast(r.msg); saveGame(); render();
-  }));
-  $$('[data-sup]').forEach(b => b.addEventListener('click', () => {
-    const r = buySupplies(state.atPort, b.dataset.sup, +b.dataset.q); toast(r.msg); saveGame(); render();
+    const r = sell(state.atPort, b.dataset.sell, +b.dataset.q); toast(r.msg); saveGame(); afterQuestTick();
   }));
   $$('[data-crew]').forEach(b => b.addEventListener('click', () => hireCrew(+b.dataset.crew)));
   $$('[data-hire]').forEach(b => b.addEventListener('click', () => hireOfficer(b.dataset.hire)));
+  $$('[data-quest]').forEach(b => b.addEventListener('click', () => {
+    const q = QUEST_BY_ID[b.dataset.quest];
+    if (accept(b.dataset.quest)) { toast(`接下委托：${q.title}`); saveGame(); afterQuestTick(); }
+  }));
   $$('[data-repair]').forEach(b => b.addEventListener('click', () => repairShip(+b.dataset.repair)));
   $$('[data-up]').forEach(b => b.addEventListener('click', () => upgradeShip(+b.dataset.ship, b.dataset.up)));
   $$('[data-buyship]').forEach(b => b.addEventListener('click', () => buyShip(b.dataset.buyship)));
@@ -438,7 +490,9 @@ function attachPanel() {
 }
 
 function doAct(a) {
-  if (a === 'pardon') offerPardon();
+  if (a === 'town') enterTown();
+  else if (a === 'water') { refillWater(); toast('淡水已补满。'); saveGame(); render(); }
+  else if (a === 'pardon') offerPardon();
   else if (a === 'final') finalChoices();
   else if (a === 'day') stepDay();
   else if (a === 'sail') toggleSail();
@@ -536,6 +590,95 @@ function buyShip(typeId) {
   toast(`${t.name} 入列。`); saveGame(); render();
 }
 
+// ===== 城镇与对话 =====
+function enterTown() {
+  if (!state.atPort) return toast('得先靠港。');
+  openTown(state.atPort, {
+    onFacility: (facId) => { closeTown(); panel = facId; render(); },
+    onNpc: (n) => talkTo(n),
+  });
+}
+
+function talkTo(n) {
+  if (n.kind === 'flavor') {
+    openModal({
+      title: n.name,
+      body: `<div class="dlg-text">${n.line}</div>`,
+      actions: [{ label: '走开', primary: true, onClick: closeModal }],
+    });
+    return;
+  }
+  showDialogNode(n, 'start');
+}
+
+function showDialogNode(n, key) {
+  const node = n.dialog[key];
+  if (!node) { closeModal(); return; }
+  const actions = (node.choices || []).map(c => ({
+    label: c.label,
+    onClick: () => {
+      if (c.next) showDialogNode(n, c.next);
+      else if (c.act) runDialogAct(n, c.act);
+      else closeModal();
+    },
+  }));
+  if (!actions.length) actions.push({
+    label: '（继续）', primary: true, onClick: () => runDialogAct(n, node.act),
+  });
+  openModal({
+    title: n.name, wide: true,
+    body: `<div class="dlg-npc">${n.name}</div><div class="dlg-text">${node.text}</div>`,
+    actions,
+  });
+}
+
+function runDialogAct(n, act) {
+  closeModal();
+  onTalk(n.id);
+  if (act) {
+    if (act.type === 'quest') {
+      const q = QUEST_BY_ID[act.id];
+      if (q && !isActive(act.id) && !isDone(act.id)) {
+        accept(act.id);
+        openModal({
+          title: '接受任务',
+          body: `<div class="dlg-quest"><b>${q.kind === 'main' ? '【主线】' : '【支线】'}${q.title}</b>
+            <p style="margin-top:6px">${escapeHtml(q.desc)}</p></div>`,
+          actions: [{ label: '好', primary: true, onClick: () => { closeModal(); afterQuestTick(); } }],
+        });
+        saveGame();
+        return;
+      }
+    } else if (act.type === 'panel') { panel = act.panel; }
+    else if (act.type === 'flag') { state.flags[act.flag] = true; }
+  }
+  afterQuestTick();
+  saveGame();
+  if (document.getElementById('town').classList.contains('hidden')) render();
+  else refreshTown();
+}
+
+// 每次可能改变任务进度后调用：结算完成的任务并弹窗。返回本次完成的任务数（0 表示无中断）
+function afterQuestTick() {
+  const finished = checkAll();
+  const n = finished.length;
+  if (!n) { render(); return 0; }
+  const showNext = () => {
+    const f = finished.shift();
+    if (!f) { render(); return; }
+    openModal({
+      title: `✅ 完成${f.quest.kind === 'main' ? '主线' : '支线'}任务`,
+      wide: true,
+      body: `<div class="story"><b>${f.quest.title}</b>
+        <p style="margin-top:8px">${escapeHtml(f.quest.doneText || '')}</p>
+        <p class="goal">🎁 奖励：${f.rewards.join('、') || '—'}</p></div>`,
+      actions: [{ label: '继续', primary: true, onClick: () => { closeModal(); showNext(); } }],
+    });
+  };
+  showNext();
+  return n;
+}
+
 // ===== 航行 =====
 function onPortClick(p) {
   if (state.atPort === p.id) { panel = 'port'; render(); return; }
@@ -600,8 +743,10 @@ function stepDay() {
   const chap = onDayAdvanced();
   if (chap) interrupt = true;
 
+  // 抵港/推进可能完成任务（afterQuestTick 内部会结算并负责重绘）
+  if (afterQuestTick()) interrupt = true;
+
   saveGame();
-  render();
   return interrupt;
 }
 
@@ -680,12 +825,14 @@ function enterBattle(enc) {
   startBattle(enc, (result) => {
     // result: {win, loot, sunk, captured}
     if (result.win) {
+      onBattleWin(enc.kind);
       state.player.gold += result.loot || 0;
       state.player.exp += 10;
       if (enc.kind === 'merchant') state.player.infamy += 3;
       if (enc.kind === 'patrol') { state.player.infamy += 5; state.player.fame -= 2; }
       state.flags.wins = (state.flags.wins || 0) + 1;
       addLog(`海战获胜，缴获 ${result.loot || 0} 金币。`);
+      setTimeout(afterQuestTick, 60);
       // 第三章：夺取法国大船 → 安妮女王复仇号
       if (state.chapter >= 3 && !state.flags.hasQAR) {
         grantQAR();
