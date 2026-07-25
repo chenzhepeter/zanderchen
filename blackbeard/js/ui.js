@@ -79,7 +79,8 @@ export function boot() {
   });
   $('#btn-slots').addEventListener('click', () => showSlots('load'));
   $('#btn-continue').disabled = !hasSave();
-  $('#town-leave').addEventListener('click', () => { closeTown(); panel = 'port'; render(); });
+  $('#town-leave').addEventListener('click', () => { closeTownFacility(); closeTown(); panel = 'port'; render(); });
+  $('#tp-close').addEventListener('click', () => closeTownFacility());
   showStart();
 }
 
@@ -166,7 +167,8 @@ function renderPanel() {
   $('#panel').innerHTML = `<div class="panel-nav">${nav}
       <button class="nav-btn" data-act="menu">☰</button></div>
     <div class="panel-body">${storyCard()}${body}</div>`;
-  attachPanel();
+  attachPanel($('#panel'));
+  if (townFacility) renderTownPanel();   // 城镇内打开的设施同步刷新
 }
 
 // 章节提示卡：显示当前目标；终章给出"三个抉择"入口
@@ -212,7 +214,7 @@ function renderMapPanel() {
 
 function renderSupplyCard() {
   const crew = fleetCrew();
-  const rate = Math.max(1, Math.round(crew / 20));
+  const rate = Math.max(1, Math.ceil(crew / 10));
   const grain = grainOnBoard();
   const days = Math.floor(Math.min(grain, state.supplies.water) / rate);
   const cap = waterCapacity();
@@ -467,8 +469,14 @@ function renderLog() {
 }
 
 // ===== 事件绑定 =====
-function attachPanel() {
-  $$('[data-panel]').forEach(b => b.addEventListener('click', () => { panel = b.dataset.panel; render(); }));
+// root 作用域化：主面板与城镇内设施面板各绑各的，避免同一节点被重复绑定
+function attachPanel(root = document) {
+  const $$r = (sel) => [...root.querySelectorAll(sel)];
+  const $$ = $$r;
+  $$('[data-panel]').forEach(b => b.addEventListener('click', () => {
+    if (townFacility) { openTownFacility(b.dataset.panel); return; }
+    panel = b.dataset.panel; render();
+  }));
   $$('[data-sail]').forEach(b => b.addEventListener('click', () => doSail(b.dataset.sail)));
   $$('[data-buy]').forEach(b => b.addEventListener('click', () => {
     const r = buy(state.atPort, b.dataset.buy, +b.dataset.q); toast(r.msg); saveGame(); afterQuestTick();
@@ -591,12 +599,45 @@ function buyShip(typeId) {
 }
 
 // ===== 城镇与对话 =====
+let townFacility = null;   // 城镇内当前打开的设施（null=没开）
+
 function enterTown() {
   if (!state.atPort) return toast('得先靠港。');
+  townFacility = null;
+  $('#town-panel').classList.add('hidden');
   openTown(state.atPort, {
-    onFacility: (facId) => { closeTown(); panel = facId; render(); },
+    onFacility: (facId) => openTownFacility(facId),
     onNpc: (n) => talkTo(n),
   });
+}
+
+// 在城镇内就地打开设施面板（不返回大地图）
+function openTownFacility(facId) {
+  townFacility = facId;
+  $('#town-panel').classList.remove('hidden');
+  renderTownPanel();
+}
+function closeTownFacility() {
+  townFacility = null;
+  $('#town-panel').classList.add('hidden');
+}
+
+const FAC_TITLE = {
+  market: '🛒 市场', tavern: '🍺 酒馆', shipyard: '🔨 造船厂',
+  governor: '🏛️ 总督府', church: '⛪ 医馆',
+};
+
+function renderTownPanel() {
+  const p = state.atPort ? PORT_BY_ID[state.atPort] : null;
+  if (!p || !townFacility) return;
+  const map = {
+    market: renderMarket, tavern: renderTavern, shipyard: renderShipyard,
+    governor: renderGovernor, church: renderChurch,
+  };
+  const fn = map[townFacility];
+  $('#tp-title').textContent = FAC_TITLE[townFacility] || '';
+  $('#tp-body').innerHTML = fn ? fn(p) : '';
+  attachPanel($('#town-panel'));
 }
 
 function talkTo(n) {
@@ -846,6 +887,20 @@ function enterBattle(enc) {
           actions: [{ label: '升起黑旗', primary: true, onClick: () => { closeModal(); render(); } }],
         });
       }
+    } else if (result.wiped) {
+      // 舰队全灭 —— 一局到此为止
+      state.gameOver = true;
+      state.ending = 'lost';
+      addLog('舰队全灭。海上再没有属于你的甲板。');
+      saveGame();
+      openModal({
+        title: '💀 舰队全灭', wide: true,
+        body: `<div class="story"><p>最后一条船在你脚下沉下去。海水没过甲板的时候，你还抓着舵轮。</p>
+          <p class="muted">没有船的船长，什么都不是。</p>
+          <p class="small muted">${state.date.y} 年 · 声望 ${state.player.fame} · 恶名 ${state.player.infamy}</p></div>`,
+        actions: [{ label: '回到主菜单', primary: true, onClick: () => { closeModal(); showStart(); } }],
+      });
+      return;
     } else {
       state.crewMorale -= 10;
       addLog('海战失利，狼狈脱离。');

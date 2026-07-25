@@ -141,7 +141,8 @@ export function advanceDay() {
   //  · 淡水：到港自动补满（免费），海上逐日消耗
   //  · 粮食：就是货舱里的「粮食」货物，需在市场购买
   // 只在海上消耗：靠港期间船员在岸上吃住，不啃船上的存粮
-  const rate = Math.max(1, Math.round(crew / 20));
+  // 消耗率：每 10 名船员每天 1 单位（开局 10 人 + 50 粮 ≈ 够 50 天）
+  const rate = Math.max(1, Math.ceil(crew / 10));
   if (!state.atPort) {
     state.supplies.water = Math.max(0, state.supplies.water - rate);
     const ate = eatGrain(rate);

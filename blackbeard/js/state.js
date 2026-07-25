@@ -3,10 +3,10 @@
 // {ok, reason} 三态返回、槽位摘要不反序列化到 state。
 import { SHIP_BY_ID } from './data/ships.js';
 import { PORTS } from './data/ports.js';
-import { GOODS } from './data/goods.js';
+import { GOODS, GOOD_BY_ID } from './data/goods.js';
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.7.25.2';
+export const APP_VERSION = '2026.7.25.3';
 export const SAVE_VERSION = 1;
 export const STORAGE_KEY = 'blackbeard.save';
 export const SLOT_KEY = (i) => `blackbeard.slot.${i}`;
@@ -78,9 +78,13 @@ export function shipStat(sh) {
     cargoMax: sh.cargoMax + (u.hold || 0) * 25,
   };
 }
+// 占舱体积：按货物 bulk 计（木材/棉花/火药体积大，香料体积小）
 export function cargoUsed(sh) {
-  return Object.values(sh.cargo || {}).reduce((a, b) => a + b, 0);
+  let n = 0;
+  for (const id in (sh.cargo || {})) n += sh.cargo[id] * (GOOD_BY_ID[id]?.bulk || 1);
+  return n;
 }
+export function bulkOf(goodId) { return GOOD_BY_ID[goodId]?.bulk || 1; }
 export function fleetSpeed() {
   const alive = state.fleet;
   if (!alive.length) return 6;
@@ -129,7 +133,7 @@ export function initNewGame() {
   });
   shipUid = 1; logUid = 1;
   const first = makeShip('skiff', '海雀号');
-  first.cargo.grain = 20;          // 开局给一点口粮，之后要自己在市场买
+  first.cargo.grain = 50;          // 约够 10 人吃 50 天；之后要自己在市场补
   state.fleet.push(first);
   seedPortStates();
   addLog('1697 年 5 月，布里斯托尔。你在艾冯河的码头上签了字，成为一名水手。');

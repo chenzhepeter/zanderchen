@@ -197,6 +197,21 @@ button { font-family: inherit; cursor: pointer; }
 .town-stage { flex: 1; min-height: 0; }
 #tcanvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
 
+/* 城镇内的设施面板（就地打开，不回大地图） */
+.town-panel {
+  position: absolute; top: 59px; right: 0; bottom: 0; width: min(440px, 92vw);
+  background: var(--parch); border-left: 3px solid #6b5330;
+  display: flex; flex-direction: column; z-index: 5;
+  box-shadow: -14px 0 40px rgba(0,0,0,.45);
+}
+.tp-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); background: rgba(107,83,48,.10);
+}
+.tp-head span { font-weight: 700; color: #4a3b22; }
+.tp-head .ghost-btn { background: rgba(107,83,48,.12); color: #4a3b22; border-color: var(--line); padding: 6px 12px; font-size: 13px; }
+.tp-body { flex: 1; overflow-y: auto; padding: 12px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+
 /* 对话框 */
 .dlg-npc { font-weight: 700; color: var(--accent); margin-bottom: 8px; }
 .dlg-text { line-height: 2; font-size: 14.5px; }
@@ -224,10 +239,37 @@ button { font-family: inherit; cursor: pointer; }
   padding: 10px 14px max(12px, env(safe-area-inset-bottom));
   font-family: 'DM Sans', sans-serif;
 }
-.battle-info { font-size: 13px; margin-bottom: 8px; }
-.brow { margin-bottom: 3px; }
-.brow .me { color: #7fb6ff; } .brow .foe { color: #ff8a7a; }
-.blog { font-size: 12px; opacity: .8; max-height: 56px; overflow-y: auto; }
+.battle-info { font-size: 13px; margin-bottom: 10px; }
+.brow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.btag {
+  background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 600;
+}
+.btag.me { color: #9ccbff; border-color: rgba(120,180,255,.45); background: rgba(70,130,220,.18); }
+.btag.foe { color: #ffab9c; border-color: rgba(255,140,120,.45); background: rgba(200,70,50,.18); }
+.bcur {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: 10px; margin-bottom: 8px;
+  background: rgba(255,255,255,.07); border-left: 4px solid #7fb6ff;
+}
+.bcur.foe { border-left-color: #ff8a7a; }
+.bcur b { font-size: 15px; }
+.bcur.me b { color: #9ccbff; } .bcur.foe b { color: #ffab9c; }
+.bcls { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: rgba(255,215,106,.18); color: #ffd76a; border: 1px solid rgba(255,215,106,.35); }
+.bstat { font-size: 12.5px; color: #b9c8d2; }
+/* 战斗日志：加大、分色、拉开对比度 */
+.blog {
+  font-size: 13.5px; line-height: 1.65; max-height: 108px; overflow-y: auto;
+  background: rgba(0,0,0,.32); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px; padding: 8px 12px;
+}
+.blog .ll { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.blog .ll:last-child { border-bottom: none; }
+.blog .me { color: #a8d4ff; }
+.blog .foe { color: #ffb0a2; }
+.blog .sys { color: #ffe08a; font-weight: 600; }
+.bbtn.flee-ok { border-color: #6ad08a; color: #b6ffcd; }
+.ammo-tip { font-size: 12px; color: #9fb0bb; align-self: center; margin-left: 6px; }
 .battle-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .bbtn {
   background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.22); color: #e8f0f4;

@@ -1,5 +1,5 @@
 // 贸易：供需价格模型 + 买卖。玩家大量吞吐会推动价格，抑制无限刷钱。
-import { state, cargoUsed, shipStat } from './state.js';
+import { state, cargoUsed, shipStat, bulkOf } from './state.js';
 import { GOODS, GOOD_BY_ID } from './data/goods.js';
 import { PORT_BY_ID } from './data/ports.js';
 
@@ -52,7 +52,8 @@ export function fleetCargoTotal(goodId) {
 export function buy(portId, goodId, qty) {
   const p = priceAt(portId, goodId);
   if (!p) return { ok: false, msg: '此地不经营这种货物。' };
-  qty = Math.min(qty, p.stock, fleetCargoSpace(), Math.floor(state.player.gold / p.buy));
+  const bulk = bulkOf(goodId);                       // 体积大的货占更多舱位
+  qty = Math.min(qty, p.stock, Math.floor(fleetCargoSpace() / bulk), Math.floor(state.player.gold / p.buy));
   if (qty <= 0) return { ok: false, msg: '钱不够、舱位不足，或者货已售罄。' };
   const cost = qty * p.buy;
   state.player.gold -= cost;
@@ -60,7 +61,7 @@ export function buy(portId, goodId, qty) {
   // 装船：按剩余舱位依次分配
   let left = qty;
   for (const s of state.fleet) {
-    const room = shipStat(s).cargoMax - cargoUsed(s);
+    const room = Math.floor((shipStat(s).cargoMax - cargoUsed(s)) / bulk);
     if (room <= 0) continue;
     const put = Math.min(room, left);
     s.cargo[goodId] = (s.cargo[goodId] || 0) + put;

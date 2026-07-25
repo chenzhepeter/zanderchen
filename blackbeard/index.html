@@ -47,6 +47,14 @@
         <button id="town-leave" class="ghost-btn">⚓ 回到海图</button>
       </div>
       <div class="town-stage"><canvas id="tcanvas"></canvas></div>
+      <!-- 设施面板：在城镇内就地打开，不必回大地图 -->
+      <div id="town-panel" class="town-panel hidden">
+        <div class="tp-head">
+          <span id="tp-title"></span>
+          <button id="tp-close" class="ghost-btn">✕ 出来</button>
+        </div>
+        <div id="tp-body" class="tp-body"></div>
+      </div>
     </div>
 
     <!-- 海战 -->
