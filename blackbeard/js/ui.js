@@ -4,6 +4,7 @@ import {
   state, APP_VERSION, NUM_SLOTS, initNewGame, saveGame, loadGame, hasSave,
   saveToSlot, loadFromSlot, deleteSlot, listSaveSlots, addLog,
   shipStat, cargoUsed, fleetCrew, fleetSpeed, makeShip,
+  addFame, totalFame, playerAtk, playerDef,
 } from './state.js';
 import { PORTS, PORT_BY_ID, NATIONS } from './data/ports.js';
 import { GOODS, GOOD_BY_ID } from './data/goods.js';
@@ -13,21 +14,27 @@ import { openTown, closeTown, refreshTown, townEntities } from './town.js';
 import { openSail, closeSail, zoomSail, sailSpanDeg } from './sailview.js';
 import { openChart, closeChart } from './worldmap.js';
 import {
-  advanceDay, setWaypoint, clearWaypoint, leavePort, enterPort, portInReach,
-  dateStr, grainOnBoard, waterCapacity, refillWater, monthlyWage, ensureNpcShips,
+  FACILITIES, facTitle, renderFacility, registerRender, doFacilityAction,
+  bindUI as bindFacilitiesUI,
+} from './facilities.js';
+import {
+  advanceHours, passTimeAshore, setWaypoint, clearWaypoint, leavePort, enterPort, portInReach,
+  dateStr, timeStr, grainOnBoard, waterCapacity, refillWater, monthlyWage, ensureNpcShips,
   nearestSeaPoint, MEET_NM, ENTER_PORT_NM,
 } from './voyage.js';
-import { marketList, buy, sell, fleetCargoTotal, fleetCargoSpace, monthlyMarketDrift } from './trade.js';
+import { marketList, buy, sell, fleetCargoTotal, fleetCargoSpace, monthlyMarketDrift, rollMarketEvents, effectsAt } from './trade.js';
 import { windAt, distanceNm, bearing } from './geo.js';
 import { seaAt } from './data/coast.js';
 import { reveal, exploredRatio } from './fog.js';
 import { onDayAdvanced, tryChapter, describeChapter, offerPardon, finalChoices, grantQAR } from './story.js';
 import { startBattle } from './battle.js';
 import {
-  ensureQuests, syncMainQuests, checkAll, accept, offersAt, activeQuests, doneQuests,
-  progressText, isActive, isDone, onBattleWin, onTalk,
+  ensureQuests, syncMainQuests, checkAll, accept, acceptJob, offersAt, activeQuests, doneQuests,
+  progressText, isActive, isDone, onBattleWin, onTalk, checkDeadlines, questById, dueText,
 } from './quests.js';
 import { QUEST_BY_ID } from './data/quests.js';
+import { DISCOVERIES, KIND_NAME } from './data/discoveries.js';
+import { foundCount, reportedCount, totalCount, unreported } from './discoveries.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -42,7 +49,10 @@ export function fmt(n) {
 
 let sidePanel = null;      // 'fleet'|'quests'|'log'|null
 let townFacility = null;   // 港口内打开的设施
-let sailing = false, sailTimer = null;
+let sailing = false, sailRaf = 0, sailLast = 0, sailMul = 1;
+// 上一次「有港口在入港半径内」的港口 id：抵港提示只在进入半径的那一刻弹，
+// 否则刚出港时人还在半径里，一起航就被自己停下来。
+let lastNearPort = null;
 
 // ===== 模态 / 提示 =====
 export function openModal({ title, body, actions = [], wide = false }) {
@@ -70,12 +80,24 @@ export function toast(msg) {
 }
 
 // ===== 启动 =====
+// facilities.js 要用的那几件 UI 能力，开机时注入（与 story.js 同一套路，避免模块循环）
+bindFacilitiesUI({
+  toast, openModal, closeModal,
+  acceptJob: (job) => {
+    if (!acceptJob(job)) return toast('这条委托接不了。');
+    toast('接下了委托：' + job.title);
+    saveGame(); render();
+  },
+  // 设施里做完事统一走这个：存档 + 重绘面板
+  after: () => { saveGame(); render(); },
+});
+
 export function boot() {
   $('#version').textContent = 'v' + APP_VERSION;
   $('#btn-new').addEventListener('click', () => { initNewGame(); saveGame(); showGame(); tryChapter(); });
   $('#btn-continue').addEventListener('click', () => {
     const r = loadGame();
-    if (!r.ok) { toast(r.reason === 'version' ? '存档版本不兼容。' : '没有可用的存档。'); return; }
+    if (!r.ok) { toast(r.reason === 'version' ? '存档来自旧版本（v' + r.oldVersion + '），本次更新改动了存档结构，请开新局。' : '没有可用的存档。'); return; }
     showGame();
   });
   $('#btn-slots').addEventListener('click', () => showSlots('load'));
@@ -86,7 +108,7 @@ export function boot() {
 }
 
 function showStart() {
-  sailing = false;
+  stopSail();
   closeSail(); closeTown();
   $('#start-screen').hidden = false;
   $('#game-screen').hidden = true;
@@ -102,6 +124,7 @@ export function showGame() {
 
 // ===== 视图切换 =====
 export function setView(v) {
+  stopSail();
   state.view = v;
   closeTownFacility();
   closeSail(); closeTown();
@@ -143,12 +166,15 @@ function renderHud() {
   $('#hud').innerHTML = `
     <div class="hud-row">
       <span class="hud-date">📅 ${dateStr()}</span>
+      <span class="hud-clock" title="船上的时间">🕐 ${timeStr()}</span>
       <span class="hud-where">${where}</span>
       <span class="hud-gold">🪙 ${fmt(p.gold)}</span>
       <span title="每月工资">💰 月薪 ${wage}</span>
     </div>
     <div class="hud-row small">
-      <span title="官方声望">🎖️ ${p.fame}</span>
+      <span title="冒险名声">🧭 ${p.fame.adventure}</span>
+      <span title="交易名声">⚖️ ${p.fame.trade}</span>
+      <span title="战斗名声">⚔️ ${p.fame.battle}</span>
       <span title="海盗恶名">🏴‍☠️ ${p.infamy}</span>
       <span title="船员 / 士气">👥 ${fleetCrew()} · 士气 ${Math.round(state.crewMorale)}</span>
       <span title="粮食（货舱）"${grain <= 0 ? ' style="color:#ff9a8a"' : ''}>🌾 ${grain}</span>
@@ -161,10 +187,13 @@ function renderHud() {
 // ===== 底部指令栏 =====
 function renderCmd() {
   const c = $('#cmd');
+  // 指令分组仿原版的 X 键菜单：航行动作在左，情报类在右，中间一道分隔
   const common = `
+    <span class="cmd-sep"></span>
     <button class="cmd-btn" data-cmd="chart">🗺️ 海图</button>
     <button class="cmd-btn" data-cmd="fleet">⚓ 舰队</button>
     <button class="cmd-btn" data-cmd="quests">📋 任务${activeQuests().length ? ` (${activeQuests().length})` : ''}</button>
+    <button class="cmd-btn" data-cmd="codex">🧭 图鉴${foundCount() ? ` (${foundCount()})` : ''}</button>
     <button class="cmd-btn" data-cmd="log">📜 日志</button>
     <button class="cmd-btn" data-cmd="menu">☰</button>`;
 
@@ -176,30 +205,33 @@ function renderCmd() {
       <span class="cmd-spacer"></span>${common}`;
   } else {
     const near = portInReach();
+    const wp = state.waypoint;
     c.innerHTML = `
-      <button class="cmd-btn primary" data-cmd="day">⏭️ 航行一天</button>
-      <button class="cmd-btn" data-cmd="auto">${sailing ? '⏸️ 停止' : '⏩ 连续航行'}</button>
-      ${state.waypoint ? '<button class="cmd-btn" data-cmd="stop">⚓ 抛锚</button>' : ''}
+      <button class="cmd-btn primary" data-cmd="auto" ${!wp && !sailing ? 'disabled' : ''}>${sailing ? '⏸️ 停船' : '⛵ 起航'}</button>
+      <button class="cmd-btn${sailing ? ' on' : ''}" data-cmd="speed">⏩ ${sailMul}×</button>
+      <button class="cmd-btn" data-cmd="watch" title="在原地守候，时间照走">⏳ 守候 6 时</button>
+      ${wp ? '<button class="cmd-btn" data-cmd="stop">⚓ 抛锚</button>' : ''}
       ${near ? `<button class="cmd-btn primary" data-cmd="enter" data-port="${near.id}">🏛️ 进入${near.name}</button>` : ''}
       <button class="cmd-btn" data-cmd="zoomin">🔍+</button>
       <button class="cmd-btn" data-cmd="zoomout">🔍−</button>
-      <span class="cmd-hint">${state.waypoint ? '航行中：点海面可改航向' : '点海面设定下一个航点'} · 视野 ${sailSpanDeg()}°</span>
+      <span class="cmd-hint">${sailing ? `航行中 · ${Math.round(fleetSpeed() * 0.55 * 24)} 浬/日` : wp ? '已定航点，点「起航」开船' : '点海面设定下一个航点'} · 视野 ${sailSpanDeg()}°</span>
       <span class="cmd-spacer"></span>${common}`;
   }
   $$('#cmd [data-cmd]').forEach(b => b.addEventListener('click', () => doCmd(b.dataset.cmd, b.dataset)));
 }
 
 function doCmd(cmd, ds) {
-  if (cmd === 'sail') { leavePort(); setView('sail'); return; }
-  if (cmd === 'day') return stepDay();
+  if (cmd === 'sail') { const from = state.atPort; leavePort(); lastNearPort = from; setView('sail'); return; }
   if (cmd === 'auto') return toggleSail();
-  if (cmd === 'stop') { clearWaypoint(); sailing = false; render(); return; }
+  if (cmd === 'speed') return cycleSpeed();
+  if (cmd === 'watch') { stepHours(6); render(); return; }
+  if (cmd === 'stop') { clearWaypoint(); setSailing(false); return; }
   if (cmd === 'enter') return doEnterPort(ds.port);
   if (cmd === 'zoomin') { zoomSail(-1); render(); return; }
   if (cmd === 'zoomout') { zoomSail(1); render(); return; }
   if (cmd === 'chart') { $('#chart-view').classList.remove('hidden'); openChart(); return; }
   if (cmd === 'menu') return showMenu();
-  if (['fleet', 'quests', 'log'].includes(cmd)) return openSidePanel(cmd);
+  if (['fleet', 'quests', 'codex', 'log'].includes(cmd)) return openSidePanel(cmd);
 }
 
 // ===== 侧栏面板 =====
@@ -216,11 +248,13 @@ function closeSidePanel() {
 function renderSidePanel() {
   const body = sidePanel === 'fleet' ? renderFleet()
     : sidePanel === 'quests' ? renderQuests()
-      : renderLog();
+      : sidePanel === 'codex' ? renderCodex()
+        : renderLog();
   $('#panel').innerHTML = `
     <div class="panel-nav">
       <button class="nav-btn${sidePanel === 'fleet' ? ' active' : ''}" data-side="fleet">⚓ 舰队</button>
       <button class="nav-btn${sidePanel === 'quests' ? ' active' : ''}" data-side="quests">📋 任务</button>
+      <button class="nav-btn${sidePanel === 'codex' ? ' active' : ''}" data-side="codex">🧭 图鉴</button>
       <button class="nav-btn${sidePanel === 'log' ? ' active' : ''}" data-side="log">📜 日志</button>
       <button class="nav-btn" data-side="close">✕</button>
     </div>
@@ -239,24 +273,54 @@ function openTownFacility(facId) {
   renderTownPanel();
 }
 function closeTownFacility() {
+  if (townFacility) passTimeAshore();     // 原版规则：每次进出设施，时间往前走半小时到一个半小时
   townFacility = null;
   const el = $('#town-panel');
   if (el) el.classList.add('hidden');
 }
-const FAC_TITLE = {
-  market: '🛒 市场', tavern: '🍺 酒馆', shipyard: '🔨 造船厂',
-  governor: '🏛️ 总督府', church: '⛪ 医馆',
-};
+// 老五家的渲染函数留在本文件，注册进设施表；新四家（银行/公会/道具屋/邸宅）写在 facilities.js。
+registerRender('market', renderMarket);
+registerRender('tavern', renderTavern);
+registerRender('shipyard', renderShipyard);
+registerRender('governor', renderGovernor);
+registerRender('church', renderChurch);
+
 function renderTownPanel() {
   const p = state.atPort ? PORT_BY_ID[state.atPort] : null;
   if (!p || !townFacility) return;
-  const map = {
-    market: renderMarket, tavern: renderTavern, shipyard: renderShipyard,
-    governor: renderGovernor, church: renderChurch,
-  };
-  $('#tp-title').textContent = FAC_TITLE[townFacility] || '';
-  $('#tp-body').innerHTML = (map[townFacility] || (() => ''))(p);
+  $('#tp-title').textContent = facTitle(townFacility);
+  $('#tp-body').innerHTML = renderFacility(townFacility, p);
   attachPanel($('#town-panel'));
+}
+
+// ===== 发现物图鉴 =====
+function renderCodex() {
+  const byKind = {};
+  for (const d of DISCOVERIES) (byKind[d.kind] ||= []).push(d);
+  const pending = unreported().length;
+  return `
+    <div class="card">
+      <h3>🧭 航海日志 · 发现物</h3>
+      <p class="big-row"><span>已发现</span><b>${foundCount()} / ${totalCount()}</b></p>
+      <p class="big-row"><span>已上缴</span><b>${reportedCount()}</b></p>
+      ${pending ? `<p class="small" style="color:#c9a24a">还有 <b>${pending}</b> 条没换成钱——去里斯本 / 阿姆斯特丹 / 伦敦的邸宅找收藏家。</p>`
+      : '<p class="small muted">没有待上缴的记录。</p>'}
+      <p class="small muted">驶近就算发现。带上望远镜能提前 35% 看到。</p>
+    </div>
+    ${Object.entries(byKind).map(([k, list]) => `<div class="card">
+      <h3>${KIND_NAME[k]}（${list.filter(d => state.discoveries.found[d.id]).length}/${list.length}）</h3>
+      ${list.map(d => {
+        const got = state.discoveries.found[d.id];
+        const rep = state.discoveries.reported[d.id];
+        if (!got) return `<div class="codex-row locked"><b>？？？</b><span class="small muted">未发现</span></div>`;
+        return `<div class="codex-row">
+          <div><b>${d.name}</b> <span class="small muted">${d.nameEn}</span>
+            <div class="small">${d.blurb}</div>
+            <div class="small muted">${d.note}</div></div>
+          <div class="cx-side small">${rep ? '<span class="good">已上缴</span>' : `🪙 ${fmt(d.reward)}`}<br>🧭 +${d.fame}</div>
+        </div>`;
+      }).join('')}
+    </div>`).join('')}`;
 }
 
 // ===== 章节卡 =====
@@ -275,6 +339,17 @@ function storyCard() {
 
 // ===== 市场 =====
 function renderMarket(p) {
+  // 当地行情与港口性质：都真真切切进了上面那张价目表
+  const fx = effectsAt(p.id);
+  const notes = [];
+  if (p.pirateHaven) notes.push('🏴‍☠️ 海盗窝：这里不问货怎么来的，卖价上浮 18%。');
+  if (p.stance === 'hostile') notes.push('⚠️ 敌视港：进出都要打点，买价 +10%、卖价折算后更低。');
+  else if (p.stance === 'wary') notes.push('👁️ 戒备港：盘查得紧，买价 +4%。');
+  for (const e of fx) {
+    const g = GOOD_BY_ID[e.good];
+    if (!g) continue;
+    notes.push(`${e.mult > 1 ? '📈' : '📉'} ${g.name}行情：价格 ×${e.mult}（还剩 ${e.remaining} 个月）`);
+  }
   const rows = marketList(p.id).map(m => {
     const own = fleetCargoTotal(m.good.id);
     return `<tr>
@@ -293,6 +368,7 @@ function renderMarket(p) {
   return `<div class="card">
     <h3>🛒 ${p.name} · 市场</h3>
     <p class="muted small">舱位剩余 ${fleetCargoSpace()} ／ 金币 ${fmt(state.player.gold)}</p>
+    ${notes.length ? `<div class="mkt-notes">${notes.map(n => `<div class="small">${n}</div>`).join('')}</div>` : ''}
     <table class="tbl"><thead><tr><th>货物</th><th>买入</th><th>卖出</th><th>库存</th><th>持有</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>
     <p class="small muted" style="margin-top:10px">🌾 <b>粮食就是口粮</b>：每 10 名船员每天吃 1 单位。💧 淡水靠港免费补满。</p>
@@ -376,13 +452,17 @@ function renderShipyard(p) {
           ${u.icon}${u.name} ${s.upgrades[u.id] || 0}/${u.max}（${fmt(u.price)}）</button>`).join('')}</div>
     </div>`;
   }).join('');
-  const buyList = SHIPS.filter(s => !s.story && s.price > 0).map(s => `
+  const CLS_NAME = { light: '轻型（快、舱小，适合抢劫与跑单帮）', medium: '中型（攻守均衡）', heavy: '重型（慢而硬，正面硬碰）' };
+  const byCls = {};
+  for (const s of SHIPS) { if (s.story || s.price <= 0) continue; (byCls[s.cls || 'medium'] ||= []).push(s); }
+  const buyList = ['light', 'medium', 'heavy'].filter(c => byCls[c]).map(c =>
+    `<p class="small muted" style="margin:10px 0 4px">${CLS_NAME[c]}</p>` + byCls[c].map(s => `
     <div class="ship-row">
       <div><b>${s.name}</b> <span class="muted">${s.nameEn}</span></div>
       <p class="small muted">耐久 ${s.hull} · 炮 ${s.guns} · 装甲 ${s.armor} · 航速 ${s.speed} · 舱 ${s.cargo} · 船员上限 ${s.crewMax}</p>
       <p class="small">${escapeHtml(s.note)}</p>
       <button class="primary-btn" data-buyship="${s.id}" ${state.player.gold < s.price || state.fleet.length >= 4 ? 'disabled' : ''}>购买（${fmt(s.price)}）</button>
-    </div>`).join('');
+    </div>`).join('')).join('');
   return `<div class="card"><h3>🔨 ${p.name} · 造船厂</h3>
       <p class="muted small">舰队 ${state.fleet.length}/4 · 金币 ${fmt(state.player.gold)}</p>${ships}</div>
     <div class="card"><h3>购置新船</h3>${buyList}</div>`;
@@ -405,16 +485,25 @@ function renderGovernor(p) {
          </div>`}
   </div>`;
 }
+// 船上有船医（healing 加成）就便宜：自己人先处理过，修士只用收个尾
+export function healDiscount() {
+  let h = 0;
+  for (const id of state.officers) h += OFFICER_BY_ID[id]?.bonus?.healing || 0;
+  return Math.max(0.4, 1 - h * 0.12);
+}
 function renderChurch(p) {
   const hurt = state.player.hpMax - state.player.hp;
-  const healCost = Math.max(0, Math.round(hurt * 8));
+  const dsc = healDiscount();
+  const healCost = Math.max(0, Math.round(hurt * 8 * dsc));
+  const tendCost = Math.round(400 * dsc);
   return `<div class="card">
       <h3>⛪ ${p.name} · 医馆</h3>
       <p class="blurb">修士放下研钵：「伤口要洗干净，酒不能代替药——虽然你们没人听。」</p>
       <p class="small">体力 ${state.player.hp}/${state.player.hpMax} · 船员士气 ${Math.round(state.crewMorale)}</p>
+      ${dsc < 1 ? `<p class="small good">船上有船医，诊金打 ${(dsc * 10).toFixed(1)} 折。</p>` : ''}
       <div class="btn-row">
         <button class="primary-btn" data-act="heal" ${hurt <= 0 ? 'disabled' : ''}>🩹 治疗${hurt > 0 ? `（${healCost}）` : '（无伤）'}</button>
-        <button class="ghost-btn" data-act="tend">💊 医治病号（400，士气 +15）</button>
+        <button class="ghost-btn" data-act="tend">💊 医治病号（${tendCost}，士气 +15）</button>
       </div>
     </div>`;
 }
@@ -426,7 +515,9 @@ function renderFleet() {
       <h3>船长 · ${p.name}</h3>
       <p class="small">体力 ${p.hp}/${p.hpMax} · 经验 ${p.exp}</p>
       <p class="small">⚓ 航海 ${sk.sailing} ｜ ⚔️ 战斗 ${sk.combat} ｜ 🎖️ 统率 ${sk.leadership} ｜ 💬 交涉 ${sk.negotiation}</p>
-      <p class="small muted">声望 ${p.fame} ／ 恶名 ${p.infamy} · 月薪支出 ${monthlyWage()}</p>
+      <p class="small">🗡️ 攻击 ${playerAtk()} ｜ 🛡️ 防御 ${playerDef()} ｜ 🍀 运 ${p.luck}</p>
+      <p class="small muted">名声：冒险 ${p.fame.adventure} ／ 交易 ${p.fame.trade} ／ 战斗 ${p.fame.battle}</p>
+      <p class="small muted">恶名 ${p.infamy} · 月薪支出 ${monthlyWage()}</p>
     </div>
     <div class="card"><h3>舰队（${state.fleet.length}/4）</h3>
     ${state.fleet.map((s, i) => {
@@ -479,6 +570,8 @@ function attachPanel(root = document) {
     if (accept(id)) { toast('接下了委托：' + QUEST_BY_ID[id].title); saveGame(); render(); }
   }));
   q('[data-act]').forEach(b => b.addEventListener('click', () => doAct(b.dataset.act)));
+  // 新设施的按钮一律写成 data-fac="设施:操作:参数"，转给 facilities.js
+  q('[data-fac]').forEach(b => b.addEventListener('click', () => doFacilityAction(b.dataset.fac)));
 }
 
 function doAct(a) {
@@ -490,17 +583,18 @@ function doAct(a) {
     toast('全船欢呼！'); saveGame(); render();
   } else if (a === 'letter') {
     if (state.player.gold < 500) return toast('金币不足。');
-    state.player.gold -= 500; state.player.fame += 5; state.flags.privateer = true;
+    state.player.gold -= 500; addFame('battle', 5); state.flags.privateer = true;
     addLog('取得私掠许可状。'); toast('获得私掠许可状。'); saveGame(); afterQuestTick();
   } else if (a === 'heal') {
-    const hurt = state.player.hpMax - state.player.hp, cost = Math.round(hurt * 8);
+    const hurt = state.player.hpMax - state.player.hp, cost = Math.round(hurt * 8 * healDiscount());
     if (hurt <= 0) return toast('你没有伤。');
     if (state.player.gold < cost) return toast('金币不足。');
     state.player.gold -= cost; state.player.hp = state.player.hpMax;
     toast('伤口包扎好了。'); saveGame(); render();
   } else if (a === 'tend') {
-    if (state.player.gold < 400) return toast('金币不足。');
-    state.player.gold -= 400; state.crewMorale = Math.min(100, state.crewMorale + 15);
+    const cost = Math.round(400 * healDiscount());
+    if (state.player.gold < cost) return toast('金币不足。');
+    state.player.gold -= cost; state.crewMorale = Math.min(100, state.crewMorale + 15);
     toast('病号们缓过来了。'); saveGame(); render();
   } else if (a === 'bounty') {
     openModal({
@@ -609,14 +703,19 @@ function runDialogAct(n, act) {
   refreshTown();
 }
 
+const KIND_WORD = (k) => ({ main: '主线', side: '支线', job: '公会' }[k] || '支线');
+
 function afterQuestTick() {
+  // 先清逾期的委托，再判完成——过期的就不该再算完成了
+  const expired = checkDeadlines();
+  for (const q of expired) toast(`委托逾期作废：${q.title}`);
   const finished = checkAll();
   const n = finished.length;
   if (!n) { render(); return 0; }
   const showNext = () => {
     const f = finished.shift();
     if (!f) { render(); return; }
-    openModal({ title: `✅ 完成${f.quest.kind === 'main' ? '主线' : '支线'}任务`, wide: true,
+    openModal({ title: `✅ 完成${KIND_WORD(f.quest.kind)}任务`, wide: true,
       body: `<div class="story"><b>${f.quest.title}</b>
         <p style="margin-top:8px">${escapeHtml(f.quest.doneText || '')}</p>
         <p class="goal">🎁 奖励：${f.rewards.join('、') || '—'}</p></div>`,
@@ -655,7 +754,7 @@ function onSailPortTap(p) {
 function doEnterPort(portId) {
   const r = enterPort(portId);
   if (!r.ok) return toast(r.msg);
-  sailing = false;
+  stopSail();
   if (r.isNew) toast(`发现新港口：${r.port.name}！`);
   saveGame();
   setView('port');
@@ -677,24 +776,61 @@ function onShipTap(s) {
   showEncounter({ ...s, nm: d });
 }
 
-function toggleSail() {
-  sailing = !sailing;
-  render();
-  if (sailing) loopSail();
+// ===== 实时航行 =====
+// 起航后时钟自行流逝、船逐帧前进；遇事（遭遇/风暴/抵港/到达航点）自动停船。
+const SEC_PER_GAME_HOUR = 0.30;       // 1 倍速下，一个游戏小时约合 0.3 秒真实时间
+const SPEEDS = [1, 2, 4];
+
+// 只停表，不重绘（供切视图/开新局这类自己会重绘的路径调用）
+function stopSail() {
+  sailing = false;
+  if (sailRaf) { cancelAnimationFrame(sailRaf); sailRaf = 0; }
 }
-function loopSail() {
-  clearTimeout(sailTimer);
-  if (!sailing) { render(); return; }
-  if (stepDay()) { sailing = false; render(); return; }
-  sailTimer = setTimeout(loopSail, 380);
+function setSailing(on) {
+  sailing = on;
+  if (sailing) { sailLast = 0; sailRaf = requestAnimationFrame(loopSail); }
+  else if (sailRaf) { cancelAnimationFrame(sailRaf); sailRaf = 0; }
+  render();
+}
+function toggleSail() {
+  if (!sailing && !state.waypoint) return toast('先点海面定一个航点，再起航。');
+  setSailing(!sailing);
+}
+function cycleSpeed() {
+  sailMul = SPEEDS[(SPEEDS.indexOf(sailMul) + 1) % SPEEDS.length];
+  render();
 }
 
-// 返回 true 表示需要中断连续航行
-function stepDay() {
+// 时钟跟的是真实时间，不是帧数——帧率低（后台标签页、老 iPad）也不该把航程拖慢。
+// 但一帧要补的时间可能很长，必须切成小步走，否则船会一步跨过海角或错过遭遇。
+const MAX_CATCHUP_SEC = 1.0;    // 一帧最多补 1 秒真实时间，防止切后台回来跳好几天
+const MAX_CHUNK_HOURS = 2;      // 每小步最多 2 游戏小时
+
+function loopSail(ts) {
+  if (!sailing) return;
+  if (!sailLast) sailLast = ts;
+  const dtReal = Math.min(MAX_CATCHUP_SEC, (ts - sailLast) / 1000);
+  sailLast = ts;
+  let hours = (dtReal / SEC_PER_GAME_HOUR) * sailMul;
+  while (hours > 0) {
+    const chunk = Math.min(MAX_CHUNK_HOURS, hours);
+    hours -= chunk;
+    if (stepHours(chunk)) { setSailing(false); return; }
+  }
+  renderHud();
+  renderCmd();
+  sailRaf = requestAnimationFrame(loopSail);
+}
+
+// 返回 true 表示需要停船
+function stepHours(hours) {
   if (state.gameOver) return true;
   const prevMonth = state.date.m;
-  const res = advanceDay();
-  if (state.date.m !== prevMonth) monthlyMarketDrift();
+  const res = advanceHours(hours);
+  if (state.date.m !== prevMonth) {
+    monthlyMarketDrift();
+    for (const n of rollMarketEvents()) { addLog('行情：' + n); toast('📰 ' + n); }
+  }
 
   let interrupt = false;
   for (const e of res.events) {
@@ -702,20 +838,53 @@ function stepDay() {
     else if (e.type === 'wageFail') { interrupt = true; toast(e.msg); }
     else toast(e.msg);
   }
+  // 发现物：停船弹窗，这是原版探险线最有仪式感的一刻
+  if (res.discovered) {
+    interrupt = true;
+    showDiscovery(res.discovered);
+  }
   if (res.reachedWaypoint) { interrupt = true; toast('已到达航点。'); }
   if (res.weather === 'storm') { interrupt = true; return showStorm(), true; }
   if (res.encounter) { interrupt = true; showEncounter(res.encounter); }
 
   const near = portInReach();
-  if (near && !state.atPort && !res.encounter) {
-    interrupt = true;
-    toast(`已抵达${near.name}外海，可以入港。`);
+  const nearId = near ? near.id : null;
+  if (nearId !== lastNearPort) {
+    if (near && !state.atPort && !res.encounter) {
+      interrupt = true;
+      toast(`已抵达${near.name}外海，可以入港。`);
+    }
+    lastNearPort = nearId;
   }
-  if (onDayAdvanced()) interrupt = true;
-  if (afterQuestTick()) interrupt = true;
-  saveGame();
-  render();
+  // 日结算才跑剧情/任务判定与存档——每帧跑一次太贵，也没有意义
+  if (res.dayRolled) {
+    if (onDayAdvanced()) interrupt = true;
+    if (afterQuestTick()) interrupt = true;
+    saveGame();
+  }
+  if (interrupt) { saveGame(); render(); }
   return interrupt;
+}
+
+function showDiscovery(list) {
+  const queue = [...list];
+  const next = () => {
+    const d = queue.shift();
+    if (!d) { saveGame(); render(); return; }
+    openModal({
+      title: `🧭 发现了${KIND_NAME[d.kind]}`, wide: true,
+      body: `<div class="story">
+        <h2 style="margin-bottom:4px">${d.name}</h2>
+        <p class="small muted">${d.nameEn}</p>
+        <p style="margin-top:10px">${d.blurb}</p>
+        <p class="small muted">${d.note}</p>
+        <p class="goal">记进了航海日志。上缴给收藏家可换约 🪙 ${fmt(d.reward)} 与冒险名声 +${d.fame}。</p>
+        <p class="small muted">收藏家在里斯本、阿姆斯特丹、伦敦的邸宅里。</p>
+      </div>`,
+      actions: [{ label: '记下来', primary: true, onClick: () => { closeModal(); next(); } }],
+    });
+  };
+  next();
 }
 
 function showStorm() {
@@ -759,8 +928,10 @@ function enterBattle(enc) {
       onBattleWin(enc.kind);
       state.player.gold += result.loot || 0;
       state.player.exp += 10;
+      // 战斗名声人人可得；抢商船涨恶名，打巡逻舰涨得更多
+      addFame('battle', enc.kind === 'patrol' ? 8 : 4);
       if (enc.kind === 'merchant') state.player.infamy += 3;
-      if (enc.kind === 'patrol') { state.player.infamy += 5; state.player.fame -= 2; }
+      if (enc.kind === 'patrol') state.player.infamy += 5;
       addLog(`海战获胜，缴获 ${result.loot || 0} 金币。`);
       if (state.chapter >= 3 && !state.flags.hasQAR) {
         grantQAR();
@@ -854,7 +1025,7 @@ function showSlots(mode) {
     else if (op === 'del') { deleteSlot(i); showSlots(mode); }
     else {
       const r = loadFromSlot(i);
-      if (!r.ok) return toast(r.reason === 'version' ? '存档版本不兼容。' : '存档损坏或为空。');
+      if (!r.ok) return toast(r.reason === 'version' ? '存档来自旧版本（v' + r.oldVersion + '），请开新局。' : '存档损坏或为空。');
       closeModal(); showGame(); toast('读取成功。');
     }
   }));

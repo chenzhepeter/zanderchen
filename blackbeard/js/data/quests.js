@@ -21,7 +21,7 @@ export const QUESTS = [
     title: '国王的许可状',
     desc: '取得私掠许可状，然后在海上击败 3 艘船——这一切都是"合法"的。',
     objective: { type: 'multi', all: [{ type: 'flag', flag: 'privateer' }, { type: 'defeat', count: 3 }] },
-    reward: { gold: 800, exp: 20, fame: 10, skill: 'combat' },
+    reward: { gold: 800, exp: 20, fame: { battle: 10 }, skill: 'combat' },
     doneText: '战争把抢劫变成了爱国。等战争结束，你会发现自己只剩下这一门手艺。',
   },
   {
@@ -95,7 +95,7 @@ export const QUESTS = [
     title: '瘟疫中的圣地亚哥',
     desc: '圣地亚哥爆发热病，修道院急需 10 单位药品——她们知道你是海盗，但顾不上了。',
     objective: { type: 'deliver', good: 'medicine', qty: 10, port: 'SANTIAGO' },
-    reward: { gold: 1100, exp: 15, fame: 15 },
+    reward: { gold: 1100, exp: 15, fame: { trade: 10, adventure: 5 } },
     doneText: '修女在你手背上画了个十字。「上帝不问船上挂什么旗。」',
   },
   {
@@ -103,7 +103,7 @@ export const QUESTS = [
     title: '几内亚的象牙',
     desc: '阿姆斯特丹的批发商要 15 单位象牙。西非的港口有货——如果你敢跑那么远。',
     objective: { type: 'deliver', good: 'ivory', qty: 15, port: 'AMSTERDAM' },
-    reward: { gold: 2200, exp: 20, skill: 'negotiation' },
+    reward: { gold: 2200, exp: 20, fame: { trade: 18 }, skill: 'negotiation' },
     doneText: '「好货。」他数钱的手很快，「下次带更多来。」',
   },
   {
@@ -111,7 +111,7 @@ export const QUESTS = [
     title: '珍宝船队的传闻',
     desc: '老海狼说，只要你手里攒够 5000 金币，他就把珍宝船队的航线图卖给你。',
     objective: { type: 'gold', amount: 5000 },
-    reward: { gold: -1500, exp: 25, infamy: 10, item: 'treasureMap' },
+    reward: { gold: -1500, exp: 25, infamy: 10, fame: { adventure: 12 }, item: 'i_treasureMap' },
     doneText: '他把一张油腻的羊皮纸推过来。「记住，看过这张图的人，一半死在海上。」',
   },
   {
@@ -119,7 +119,7 @@ export const QUESTS = [
     title: '清剿海盗（？）',
     desc: '波士顿商会悬赏：击败 2 艘海上劫掠者。他们不知道委托的对象是谁。',
     objective: { type: 'defeat', count: 2, kind: 'patrol' },
-    reward: { gold: 1400, exp: 18, fame: 20, infamy: -10 },
+    reward: { gold: 1400, exp: 18, fame: { battle: 20 }, infamy: -10 },
     doneText: '你领了赏金，商会主席还跟你握了手。整件事从头到尾都很荒唐。',
   },
   {
@@ -127,7 +127,7 @@ export const QUESTS = [
     title: '故乡的来信',
     desc: '布里斯托尔的老工头认出了你。「回来看看吧，」他说，「带 30 单位烟草回来，让大伙儿知道你混出息了。」',
     objective: { type: 'deliver', good: 'tobacco', qty: 30, port: 'BRISTOL' },
-    reward: { gold: 800, exp: 12, fame: 10, morale: 8 },
+    reward: { gold: 800, exp: 12, fame: { trade: 10 }, morale: 8 },
     doneText: '老工头分烟叶的时候手一直在抖。「小爱德华，」他说，「你娘要是还在就好了。」',
   },
 ];

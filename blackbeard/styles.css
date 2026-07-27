@@ -274,6 +274,8 @@ button { font-family: inherit; cursor: pointer; }
 }
 .btag.me { color: #9ccbff; border-color: rgba(120,180,255,.45); background: rgba(70,130,220,.18); }
 .btag.foe { color: #ffab9c; border-color: rgba(255,140,120,.45); background: rgba(200,70,50,.18); }
+.btag.win { color: #b6f0c4; border-color: rgba(120,220,150,.5); background: rgba(60,160,90,.20); }
+.btag.lose { color: #d8cfae; border-color: rgba(200,180,120,.35); background: rgba(120,100,50,.18); }
 .bcur {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 12px; border-radius: 10px; margin-bottom: 8px;
@@ -315,26 +317,62 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--parch); border: 2px solid #6b5330; border-radius: 14px; padding: 20px 22px;
 }
 .duel-card h2 { font-size: 20px; margin-bottom: 12px; color: #4a3b22; }
-.duel-side { margin-bottom: 10px; }
-.duel-side.foe { text-align: right; }
 .dname { font-weight: 700; font-size: 14px; color: #4a3b22; }
-.dbar { height: 12px; background: rgba(0,0,0,.14); border-radius: 6px; overflow: hidden; margin: 4px 0 2px; }
+.dbar { height: 10px; background: rgba(0,0,0,.14); border-radius: 5px; overflow: hidden; margin: 4px 0 2px; }
 .dbar i { display: block; height: 100%; transition: width .2s; }
-.dbar.hp i { background: linear-gradient(to right, #a33127, #d4553f); }
-.dbar.st i { background: linear-gradient(to right, #8c6d2f, #d8b04a); }
-.tell {
-  margin: 12px 0; padding: 10px 12px; font-size: 13.5px; line-height: 1.7;
-  background: rgba(140,47,34,.10); border-left: 3px solid var(--accent); border-radius: 4px; color: #4a3b22;
+.dbar.st i.p { background: linear-gradient(to right, #8c6d2f, #d8b04a); }
+.dbar.st i.f { background: linear-gradient(to right, #6b5330, #a3894f); }
+
+/* 头部：我方 / 回合数 / 对手 */
+.duel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.duel-head .foe { text-align: right; }
+.dround { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+
+/* 共用体力槽：中间的界线被推来推去 */
+.duel-tug {
+  position: relative; display: flex; height: 22px; margin: 8px 0 10px;
+  border: 2px solid #6b5330; border-radius: 11px; overflow: hidden; background: rgba(0,0,0,.12);
 }
-.duel-moves { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.dmove {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+.duel-tug i { display: block; height: 100%; transition: width .28s ease; }
+.duel-tug .tug-p { background: linear-gradient(to right, #2f6b4f, #4f9c72); }
+.duel-tug .tug-f { background: linear-gradient(to left, #8c2f22, #c2503c); }
+.duel-tug .tug-n {
+  position: absolute; top: 2px; font-size: 12px; font-weight: 700; color: #fff8e6;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.duel-tug .tug-n.l { left: 8px; }
+.duel-tug .tug-n.r { right: 8px; }
+.duel-stam { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+
+/* 招式 / 架势选择 */
+.duel-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dp-head { font-size: 13px; font-weight: 700; color: #4a3b22; margin-bottom: 6px; }
+.dp-head .muted { font-weight: 400; font-size: 11.5px; margin-left: 4px; }
+.dzone {
+  display: grid; grid-template-columns: 30px 1fr; grid-template-rows: auto auto; align-items: center;
+  column-gap: 6px; width: 100%; text-align: left; margin-bottom: 6px;
   background: rgba(255,252,242,.75); border: 1px solid var(--line); border-radius: 10px;
-  padding: 10px 4px; font-size: 13px; color: #4a3b22; font-weight: 600;
+  padding: 7px 9px; color: #4a3b22;
 }
-.dmove:hover { background: #fff; border-color: var(--accent); }
-.dmove .di { font-size: 22px; }
-.duel-extra { margin-top: 10px; }
+.dzone .dz-i { grid-row: span 2; font-size: 20px; text-align: center; }
+.dzone b { font-size: 13.5px; }
+.dzone .small { font-size: 11px; line-height: 1.4; }
+.dzone:hover { background: #fff; border-color: var(--accent); }
+.dzone.on { background: #fff5dd; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(140,47,34,.22); }
+
+/* 相克表：明规则，选中行高亮 */
+.duel-mx { width: 100%; border-collapse: collapse; margin: 10px 0 4px; font-size: 11.5px; }
+.duel-mx th, .duel-mx td { border: 1px solid rgba(107,83,48,.28); padding: 3px 4px; text-align: center; color: #4a3b22; }
+.duel-mx th { font-weight: 700; background: rgba(107,83,48,.10); }
+.duel-mx tr.on th, .duel-mx tr.on td { background: rgba(216,176,74,.22); }
+.duel-mx .t-none { color: #7b6a4a; }
+.duel-mx .t-normal { color: #8c6d2f; font-weight: 600; }
+.duel-mx .t-big { color: #8c2f22; font-weight: 700; }
+
+.duel-go { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.duel-go .big { flex: 1; }
+.d-blk { color: #7b6a4a; }
+.d-hd { font-weight: 700; color: #6b5330; }
 .duel-log { margin-top: 12px; font-size: 12.5px; line-height: 1.8; color: #4a3b22; }
 .duel-log div { padding: 3px 0; border-bottom: 1px dashed rgba(107,83,48,.2); }
 .duel-end { text-align: center; padding: 20px 0; }
@@ -348,3 +386,37 @@ button { font-family: inherit; cursor: pointer; }
   .panel { width: 100%; height: 48%; border-left: none; border-top: 3px solid #6b5330; }
   .duel-moves { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ===== 新设施面板（银行 / 道具屋 / 公会 / 邸宅）与图鉴 ===== */
+.big-row { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; font-size: 14px; }
+.big-row b { font-size: 16px; }
+.btn-row .s-btn, .sr-buy .s-btn {
+  background: rgba(255,252,242,.8); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 10px; font-size: 12.5px; color: #4a3b22; font-weight: 600; white-space: nowrap;
+}
+.s-btn {
+  background: rgba(255,252,242,.8); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 10px; font-size: 12.5px; color: #4a3b22; font-weight: 600; white-space: nowrap;
+}
+.s-btn:hover:not(:disabled) { background: #fff; border-color: var(--accent); }
+.s-btn:disabled { opacity: .42; }
+.btn-row .s-btn.primary, .s-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff5e6; }
+
+.shop-row, .job-row, .codex-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px dashed rgba(107,83,48,.22);
+}
+.shop-row:last-child, .job-row:last-child, .codex-row:last-child { border-bottom: 0; }
+.sr-main, .jr-main { flex: 1; min-width: 0; }
+.sr-stat { width: 58px; text-align: right; font-size: 12.5px; color: #6b5330; font-weight: 600; }
+.sr-buy { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.job-row.locked { opacity: .55; }
+.codex-row { justify-content: space-between; }
+.codex-row.locked { opacity: .45; }
+.cx-side { text-align: right; white-space: nowrap; color: #6b5330; }
+.mkt-notes {
+  margin: 8px 0; padding: 7px 10px; border-radius: 6px;
+  background: rgba(140,109,47,.12); border-left: 3px solid var(--gold);
+  line-height: 1.75; color: #4a3b22;
+}
+.cmd-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: rgba(200,170,110,.28); }

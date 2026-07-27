@@ -228,6 +228,18 @@ export const PORTS = [
   },
 ];
 
+// 新增的四家设施按港口规模自动铺开，免得三十一个港逐个手写。
+// 道具屋：稍成气候的港就有；银行与公会要够大；邸宅只在大港与三处收藏家所在地。
+const COLLECTOR_PORTS = ['LISBON', 'AMSTERDAM', 'LONDON'];
+for (const p of PORTS) {
+  if (p.anchorageOnly) continue;
+  const add = [];
+  if (p.size >= 2) add.push('shop');
+  if (p.size >= 3) add.push('bank', 'guild');
+  if (p.size >= 4 || COLLECTOR_PORTS.includes(p.id)) add.push('mansion');
+  for (const f of add) if (!p.facilities.includes(f)) p.facilities.push(f);
+}
+
 export const PORT_BY_ID = Object.fromEntries(PORTS.map(p => [p.id, p]));
 
 export const NATIONS = {

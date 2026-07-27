@@ -4,10 +4,12 @@
 import { SHIP_BY_ID } from './data/ships.js';
 import { PORTS } from './data/ports.js';
 import { GOODS, GOOD_BY_ID } from './data/goods.js';
+import { EQUIP_BY_ID } from './data/equipment.js';
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.7.27.1';
-export const SAVE_VERSION = 1;
+export const APP_VERSION = '2026.7.27.2';
+// v2：加入小时时钟、三条名声、装备/背包、银行、发现物 —— 旧存档不兼容
+export const SAVE_VERSION = 2;
 export const STORAGE_KEY = 'blackbeard.save';
 export const SLOT_KEY = (i) => `blackbeard.slot.${i}`;
 export const NUM_SLOTS = 5;
@@ -19,17 +21,23 @@ export function nextShipUid() { return shipUid++; }
 
 export const state = {
   version: SAVE_VERSION,
-  date: { y: 1697, m: 5, d: 1 },
+  date: { y: 1697, m: 5, d: 1, h: 8 },   // h：小时（0–23.5，半小时步进）
   chapter: 0,
   player: {
     name: '爱德华·蒂奇',
     gold: 400,
-    fame: 0,      // 官方声望
-    infamy: 0,    // 海盗恶名
+    // 三条名声（仿原版：冒険 / 交易 / 戦闘）
+    fame: { adventure: 0, trade: 0, battle: 0 },
+    infamy: 0,    // 通缉度（三结局判定依赖它，与三名声并存）
+    luck: 30,     // 運：影响决斗触发、海上事故
     hp: 100, hpMax: 100,
     skills: { sailing: 1, combat: 1, leadership: 1, negotiation: 1 },
+    equipment: { weapon: null, armor: null },
     exp: 0,
   },
+  inventory: [],                          // 道具/备用装备 id 列表
+  bank: { deposit: 0, loan: 0 },          // 存款（月利3%）/ 借款（月利10%）
+  discoveries: { found: {}, reported: {} },
   fleet: [],
   flagship: 0,             // fleet 索引
   crewMorale: 70,
@@ -47,9 +55,6 @@ export const state = {
   discovered: ['BRISTOL'],
   portState: {},           // portId -> { stock: {goodId: qty}, mod: {goodId: 倍率} }
   activeEffects: [],       // 统一 buff/debuff 池（带 remaining）
-  eventLog: [],
-  pendingEvent: null,
-  pendingDialog: null,
   log: [],                 // 航海日志
   gameOver: false,
   ending: null,
@@ -98,6 +103,47 @@ export function fleetCrew() {
   return state.fleet.reduce((a, s) => a + s.crew, 0);
 }
 
+// ===== 主角派生属性 =====
+// 决斗伤害与接舷战力都读这两个：装备 + 剑技
+export function playerAtk() {
+  const w = EQUIP_BY_ID[state.player.equipment?.weapon];
+  return 6 + (w?.atk || 0) + (state.player.skills?.combat || 1) * 2;
+}
+export function playerDef() {
+  const a = EQUIP_BY_ID[state.player.equipment?.armor];
+  return (a?.def || 0) + (state.player.skills?.combat || 1);
+}
+export function hasItem(id) { return state.inventory.includes(id); }
+export function addItem(id) { state.inventory.push(id); }
+export function removeItem(id) {
+  const i = state.inventory.indexOf(id);
+  if (i >= 0) state.inventory.splice(i, 1);
+  return i >= 0;
+}
+
+// ===== 三条名声 =====
+// 全部走这两个函数，避免各处再直接 +=（旧代码把 fame 当数字用过）
+export function addFame(track, n) {
+  const f = state.player.fame;
+  if (typeof f !== 'object') return;
+  if (typeof track === 'object') {          // 支持 addFame({trade:8, battle:2})
+    for (const k in track) if (k in f) f[k] = Math.max(0, f[k] + track[k]);
+    return;
+  }
+  if (track in f) f[track] = Math.max(0, f[track] + n);
+}
+export function totalFame() {
+  const f = state.player.fame;
+  return typeof f === 'object' ? (f.adventure + f.trade + f.battle) : (f || 0);
+}
+// 名声门槛：req 形如 { trade:200, battle:150 }，全部满足才算够
+export function meetsFame(req) {
+  if (!req) return true;
+  const f = state.player.fame;
+  for (const k in req) if ((f[k] || 0) < req[k]) return false;
+  return true;
+}
+
 export function addLog(text) {
   state.log.unshift({ id: logUid++, date: { ...state.date }, text });
   if (state.log.length > 200) state.log.length = 200;
@@ -107,14 +153,20 @@ export function addLog(text) {
 export function initNewGame() {
   Object.assign(state, {
     version: SAVE_VERSION,
-    date: { y: 1697, m: 5, d: 1 },
+    date: { y: 1697, m: 5, d: 1, h: 8 },
     chapter: 0,
     player: {
-      name: '爱德华·蒂奇', gold: 400, fame: 0, infamy: 0,
+      name: '爱德华·蒂奇', gold: 400,
+      fame: { adventure: 0, trade: 0, battle: 0 },
+      infamy: 0, luck: 30,
       hp: 100, hpMax: 100,
       skills: { sailing: 1, combat: 1, leadership: 1, negotiation: 1 },
+      equipment: { weapon: 'w_cutlass', armor: 'a_leather' },   // 开局带一把水手弯刀
       exp: 0,
     },
+    inventory: [],
+    bank: { deposit: 0, loan: 0 },
+    discoveries: { found: {}, reported: {} },
     fleet: [],
     flagship: 0,
     crewMorale: 70,
@@ -132,9 +184,6 @@ export function initNewGame() {
     discovered: ['BRISTOL'],
     portState: {},
     activeEffects: [],
-    eventLog: [],
-    pendingEvent: null,
-    pendingDialog: null,
     log: [],
     gameOver: false,
     ending: null,
@@ -176,8 +225,8 @@ function buildPayload() {
       npcShips: state.npcShips, fog: state.fog,
       officers: state.officers, quests: state.quests, flags: state.flags,
       discovered: state.discovered, portState: state.portState,
-      activeEffects: state.activeEffects, eventLog: state.eventLog,
-      pendingEvent: state.pendingEvent, pendingDialog: state.pendingDialog,
+      inventory: state.inventory, bank: state.bank, discoveries: state.discoveries,
+      activeEffects: state.activeEffects,
       log: state.log, gameOver: state.gameOver, ending: state.ending,
     },
     counters: { ship: shipUid, log: logUid },
@@ -235,7 +284,9 @@ export function listSaveSlots() {
       out.push({
         slot: i, savedAt: p.savedAt,
         date: s.date, chapter: s.chapter,
-        gold: s.player?.gold, fame: s.player?.fame, infamy: s.player?.infamy,
+        gold: s.player?.gold, infamy: s.player?.infamy,
+        // 摘要只显示名声总和（三条分列留给存档内的人物面板）
+        fame: (() => { const f = s.player?.fame; return typeof f === 'object' ? (f.adventure + f.trade + f.battle) : (f || 0); })(),
         ships: s.fleet?.length || 0,
         where: s.atPort || '海上',
       });

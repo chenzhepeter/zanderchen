@@ -1,19 +1,32 @@
 // 任务引擎：接取 / 追踪 / 判定 / 结算。主线随章节自动接取，支线由 NPC 或港口给出。
-import { state, addLog } from './state.js';
+import { state, addLog, addFame, addItem } from './state.js';
 import { QUESTS, QUEST_BY_ID } from './data/quests.js';
 import { PORT_BY_ID } from './data/ports.js';
 import { GOOD_BY_ID } from './data/goods.js';
 import { OFFICER_BY_ID } from './data/officers.js';
+import { EQUIP_BY_ID } from './data/equipment.js';
+
+const FAME_NAME = { adventure: '冒险名声', trade: '交易名声', battle: '战斗名声' };
 
 export function ensureQuests() {
   if (!state.quests) state.quests = { active: [], done: [], counters: { wins: 0, winsMerchant: 0, winsPatrol: 0 } };
   if (!state.quests.counters) state.quests.counters = { wins: 0, winsMerchant: 0, winsPatrol: 0 };
+  // 公会委托是运行时生成的，不在 QUESTS 表里——接下来的那份得自己存着
+  if (!state.quests.jobs) state.quests.jobs = {};
+}
+
+// 任务对象可能来自静态表，也可能是接下的公会委托
+export function questById(id) {
+  ensureQuests();
+  return QUEST_BY_ID[id] || state.quests.jobs[id] || null;
 }
 
 export const isActive = id => { ensureQuests(); return state.quests.active.some(a => a.id === id); };
 export const isDone = id => { ensureQuests(); return state.quests.done.includes(id); };
-export const activeQuests = () => { ensureQuests(); return state.quests.active.map(a => QUEST_BY_ID[a.id]).filter(Boolean); };
-export const doneQuests = () => { ensureQuests(); return state.quests.done.map(id => QUEST_BY_ID[id]).filter(Boolean); };
+export const activeQuests = () => { ensureQuests(); return state.quests.active.map(a => questById(a.id)).filter(Boolean); };
+export const doneQuests = () => { ensureQuests(); return state.quests.done.map(id => questById(id)).filter(Boolean); };
+
+const KIND_WORD = { main: '主线', side: '支线', job: '公会' };
 
 export function accept(id) {
   ensureQuests();
@@ -21,8 +34,51 @@ export function accept(id) {
   const q = QUEST_BY_ID[id];
   if (!q) return false;
   state.quests.active.push({ id, since: { ...state.date } });
-  addLog(`接受${q.kind === 'main' ? '主线' : '支线'}任务：${q.title}`);
+  addLog(`接受${KIND_WORD[q.kind] || '支线'}任务：${q.title}`);
   return true;
+}
+
+// 接下一条公会委托：任务对象随存档一起保存，并按月数算出到期日
+export function acceptJob(job) {
+  ensureQuests();
+  if (isActive(job.id) || isDone(job.id)) return false;
+  state.quests.jobs[job.id] = job;
+  state.quests.active.push({ id: job.id, since: { ...state.date }, due: dueDate(job.deadlineMonths || 1) });
+  addLog(`接下公会委托：${job.title}`);
+  return true;
+}
+
+function dueDate(months) {
+  let y = state.date.y, m = state.date.m + months;
+  while (m > 12) { m -= 12; y++; }
+  return { y, m, d: state.date.d };
+}
+function pastDue(due) {
+  if (!due) return false;
+  const a = state.date;
+  if (a.y !== due.y) return a.y > due.y;
+  if (a.m !== due.m) return a.m > due.m;
+  return a.d > due.d;
+}
+export function dueText(a) {
+  if (!a.due) return '';
+  return `期限 ${a.due.y}年${a.due.m}月${a.due.d}日`;
+}
+
+// 逾期作废：扣名声，任务从列表里消失（原版是 −10）
+export function checkDeadlines() {
+  ensureQuests();
+  const expired = [];
+  for (const a of [...state.quests.active]) {
+    if (!pastDue(a.due)) continue;
+    const q = questById(a.id);
+    state.quests.active = state.quests.active.filter(x => x.id !== a.id);
+    delete state.quests.jobs[a.id];
+    if (q?.failPenalty) addFame(q.failPenalty);
+    addLog(`委托逾期作废：${q?.title || a.id}。`);
+    expired.push(q || { title: a.id });
+  }
+  return expired;
 }
 
 // 主线随章节自动接取
@@ -53,6 +109,7 @@ function evalObj(o) {
   const c = state.quests.counters;
   switch (o.type) {
     case 'visit': return state.discovered.includes(o.port);
+    case 'arrive': return state.atPort === o.port;   // 必须人现在就在那个港
     case 'visitAny': return o.ports.some(p => state.discovered.includes(p));
     case 'deliver': return state.atPort === o.port && cargoTotal(o.good) >= o.qty;
     case 'defeat': {
@@ -77,6 +134,7 @@ export function progressText(q) {
   const one = (o) => {
     switch (o.type) {
       case 'visit': return `抵达 ${PORT_BY_ID[o.port]?.name || o.port}　${state.discovered.includes(o.port) ? '✅' : '⬜'}`;
+      case 'arrive': return `亲自赶到 ${PORT_BY_ID[o.port]?.name || o.port}　${evalObj(o) ? '✅' : '⬜'}`;
       case 'visitAny': return `抵达任意美洲港口　${o.ports.some(p => state.discovered.includes(p)) ? '✅' : '⬜'}`;
       case 'deliver': return `在 ${PORT_BY_ID[o.port]?.name} 交付 ${GOOD_BY_ID[o.good]?.name} ×${o.qty}　（当前船上 ${cargoTotal(o.good)}）${evalObj(o) ? '✅' : ''}`;
       case 'defeat': {
@@ -101,7 +159,12 @@ function grant(q) {
   const bits = [];
   if (r.gold) { p.gold = Math.max(0, p.gold + r.gold); bits.push(`${r.gold > 0 ? '+' : ''}${r.gold} 金币`); }
   if (r.exp) { p.exp += r.exp; bits.push(`+${r.exp} 经验`); }
-  if (r.fame) { p.fame = Math.max(0, p.fame + r.fame); bits.push(`声望 ${r.fame > 0 ? '+' : ''}${r.fame}`); }
+  if (r.fame) {
+    // 兼容旧写法（数字→战斗名声）；新写法是 { adventure, trade, battle }
+    const f = typeof r.fame === 'number' ? { battle: r.fame } : r.fame;
+    addFame(f);
+    bits.push(Object.entries(f).map(([k, v]) => `${FAME_NAME[k]} ${v > 0 ? '+' : ''}${v}`).join(' '));
+  }
   if (r.infamy) { p.infamy = Math.max(0, p.infamy + r.infamy); bits.push(`恶名 ${r.infamy > 0 ? '+' : ''}${r.infamy}`); }
   if (r.morale) { state.crewMorale = Math.min(100, state.crewMorale + r.morale); bits.push(`士气 +${r.morale}`); }
   if (r.skill && p.skills[r.skill] !== undefined) { p.skills[r.skill] += 1; bits.push(`${skillName(r.skill)} +1`); }
@@ -109,7 +172,7 @@ function grant(q) {
     state.officers.push(r.officer);
     bits.push(`${OFFICER_BY_ID[r.officer]?.name || r.officer} 加入`);
   }
-  if (r.item) { state.flags['item_' + r.item] = true; bits.push('获得道具'); }
+  if (r.item) { addItem(r.item); bits.push(`获得${EQUIP_BY_ID[r.item]?.name || '道具'}`); }
   return bits;
 }
 function skillName(k) {
@@ -140,14 +203,15 @@ export function checkAll() {
   syncMainQuests();
   const finished = [];
   for (const a of [...state.quests.active]) {
-    const q = QUEST_BY_ID[a.id];
+    const q = questById(a.id);
     if (!q) continue;
     if (!evalObj(q.objective)) continue;
     consumeDeliver(q);
     const bits = grant(q);
     state.quests.active = state.quests.active.filter(x => x.id !== a.id);
     state.quests.done.push(a.id);
-    addLog(`完成${q.kind === 'main' ? '主线' : '支线'}任务：${q.title}`);
+    delete state.quests.jobs[a.id];
+    addLog(`完成${KIND_WORD[q.kind] || '支线'}任务：${q.title}`);
     finished.push({ quest: q, rewards: bits });
   }
   return finished;

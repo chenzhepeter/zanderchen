@@ -1,5 +1,5 @@
 // 剧情推进：章节触发、旗标、三结局判定
-import { state, addLog, saveGame, makeShip } from './state.js';
+import { state, addLog, saveGame, makeShip, addFame, totalFame } from './state.js';
 import { CHAPTERS, ENDINGS } from './data/chapters.js';
 import { PORT_BY_ID } from './data/ports.js';
 
@@ -72,7 +72,7 @@ export function offerPardon() {
           state.flags.pardonAccepted = true;
           state.flags.chapter6 = true;
           state.player.infamy = Math.max(0, state.player.infamy - 25);
-          state.player.fame += 15;
+          addFame('trade', 15);   // 招安：官方声誉回升
           addLog('接受了国王的赦免。海面很安静。');
           UI.toast('你接受了赦免。'); saveGame(); UI.refresh();
         },
@@ -130,7 +130,7 @@ export function finalChoices() {
     title: '终章 · 三个抉择',
     wide: true,
     body: `<div class="story"><p>路就在脚下分成三条。</p>
-      <p class="small muted">当前：金币 ${state.player.gold} ／ 声望 ${p.fame} ／ 恶名 ${p.infamy} ／ 盟友 ${allies}</p></div>`,
+      <p class="small muted">当前：金币 ${state.player.gold} ／ 名声 ${totalFame()} ／ 恶名 ${p.infamy} ／ 盟友 ${allies}</p></div>`,
     actions: acts,
   });
 }
@@ -161,7 +161,7 @@ function finish(code) {
     wide: true,
     body: `<div class="story ending">${ending.text}
       <p class="hist">📖 <b>史料：</b>${ending.note}</p>
-      <p class="small muted">本局：${state.date.y} 年 · 金币 ${state.player.gold} · 声望 ${state.player.fame} · 恶名 ${state.player.infamy} · 舰队 ${state.fleet.length} 艘</p></div>`,
+      <p class="small muted">本局：${state.date.y} 年 · 金币 ${state.player.gold} · 名声 ${totalFame()} · 恶名 ${state.player.infamy} · 舰队 ${state.fleet.length} 艘</p></div>`,
     actions: [{ label: '完', primary: true, onClick: () => { UI.closeModal(); UI.refresh(); } }],
   });
 }

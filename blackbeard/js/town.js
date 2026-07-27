@@ -2,18 +2,13 @@
 // 布局由 portId 哈希决定 → 每个港口固定且各不相同，但无需手工摆 31 张图。
 import { state } from './state.js';
 import { PORT_BY_ID, NATIONS } from './data/ports.js';
+import { FACILITIES } from './facilities.js';
 import { STORY_NPCS, NPC_ARCHETYPES, archetypeLine } from './data/npcs.js';
 import { GOOD_BY_ID } from './data/goods.js';
 import { offersAt, isActive, isDone } from './quests.js';
 
 const W = 1200, H = 700;
-const FAC = {
-  market: { icon: '🛒', name: '市场', color: '#b0894a' },
-  tavern: { icon: '🍺', name: '酒馆', color: '#9c6b3f' },
-  shipyard: { icon: '🔨', name: '造船厂', color: '#7a6a52' },
-  governor: { icon: '🏛️', name: '总督府', color: '#9a8a5e' },
-  church: { icon: '⛪', name: '医馆', color: '#8a8a94' },
-};
+
 
 let canvas, ctx, T = null, cb = {}, raf = 0;
 
@@ -58,15 +53,24 @@ function buildTown(port) {
   const seed = hash(port.id);
   const buildings = [];
   const facs = port.facilities || [];
-  facs.forEach((f, i) => {
-    const row = i % 2;                       // 街道两侧交错排列
-    const x = 285 + i * 172 + ((seed >> (i * 2)) % 26);
-    const y = row === 0 ? 168 : 452;
-    buildings.push({
-      id: f, ...FAC[f], x, y, w: 148, h: 104,
-      doorX: x + 74, doorY: row === 0 ? y + 104 + 22 : y - 22,
+  // 街道两侧各排一行。大港有九家设施，得按数量摊开，不能固定间距——否则排到画布外面去。
+  const BW = 130, BH = 96;
+  const top = facs.filter((_, i) => i % 2 === 0);
+  const bot = facs.filter((_, i) => i % 2 === 1);
+  const place = (list, y, rowIdx) => {
+    const n = list.length;
+    const x0 = 240, x1 = 1160 - BW;
+    const step = n > 1 ? (x1 - x0) / (n - 1) : 0;
+    list.forEach((f, k) => {
+      const x = Math.round(x0 + step * k + ((seed >> (k * 2 + rowIdx)) % 14));
+      buildings.push({
+        id: f, ...FACILITIES[f], x, y, w: BW, h: BH,
+        doorX: x + BW / 2, doorY: rowIdx === 0 ? y + BH + 20 : y - 20,
+      });
     });
-  });
+  };
+  place(top, 168, 0);
+  place(bot, 456, 1);
   return {
     port, seed, buildings,
     npcs: placeNpcs(port, seed, buildings),

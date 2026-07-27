@@ -4,18 +4,18 @@ import { state } from './state.js';
 import { PORTS, NATIONS } from './data/ports.js';
 import { LAND_RINGS, distanceNm, bearing, windAt, isSea } from './geo.js';
 import { isKnown } from './fog.js';
-import { drawMinimap } from './worldmap.js';
 
 let canvas, ctx, cb = {}, raf = 0, T = null;
 
-// 视野跨度（度）：可缩放，越小越"贴近海面"
-const ZOOMS = [4, 8, 16, 32];
+// 视野跨度（度）：出海只看得见眼前一段海面——最远也不过望远镜视距，
+// 想知道自己在世界的哪里，只能开海图。
+const ZOOMS = [2, 4, 8, 12];
 
 export function openSail(callbacks) {
   cb = callbacks || {};
   canvas = document.getElementById('scanvas');
   ctx = canvas.getContext('2d');
-  T = { zoom: 1, hover: null, t: 0 };
+  T = { zoom: 1, hover: null, t: 0, wake: [] };
   resize();
   window.addEventListener('resize', resize);
   canvas.addEventListener('pointerdown', onTap);
@@ -135,6 +135,8 @@ function draw() {
   drawLand(v);
   drawGrid(v);
   drawPorts(v);
+  pushWake();
+  drawWake(v);
   drawNpcShips(v);
   drawRouteLine(v);
   drawOwnShip(v);
@@ -264,12 +266,51 @@ function drawSail(x, y, heading, color, size) {
   ctx.restore();
 }
 
+// 航迹尾流：记录走过的经纬点，越旧越淡
+function pushWake() {
+  const p = state.position;
+  const last = T.wake[T.wake.length - 1];
+  if (!last || Math.hypot(last.lng - p.lng, last.lat - p.lat) > sailSpanDeg() * 0.006) {
+    T.wake.push({ lng: p.lng, lat: p.lat });
+    if (T.wake.length > 90) T.wake.shift();
+  }
+}
+function drawWake(v) {
+  if (T.wake.length < 2) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (let i = 1; i < T.wake.length; i++) {
+    const a = toScreen(v, T.wake[i - 1].lng, T.wake[i - 1].lat);
+    const b = toScreen(v, T.wake[i].lng, T.wake[i].lat);
+    const k = i / T.wake.length;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.05 + k * 0.30).toFixed(3)})`;
+    ctx.lineWidth = 1 + k * 3;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawOwnShip(v) {
   const s = toScreen(v, state.position.lng, state.position.lat);
   const size = Math.max(11, canvas.width / 105);
-  // 航迹
+  // 船尾的白浪：只在真的在走的时候翻起来
+  if (state.waypoint) {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate((state.heading || 0) * Math.PI / 180);
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const off = ((T.t * 34 + i * 12) % 36);
+      ctx.globalAlpha = 0.5 * (1 - off / 36);
+      ctx.beginPath();
+      ctx.arc(0, size * 1.1 + off, size * (0.35 + off / 55), Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
+  ctx.globalAlpha = 1;
   ctx.beginPath(); ctx.arc(s.x, s.y, size * 1.9 + Math.sin(T.t * 2) * 2, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
   drawSail(s.x, s.y, state.heading || 0, '#2f5fa8', size);
@@ -308,18 +349,6 @@ function drawOverlay(v) {
   ctx.fillStyle = '#fff'; ctx.font = `${Math.max(11, canvas.width / 120)}px "DM Sans", sans-serif`;
   ctx.textAlign = 'left';
   ctx.fillText(`${Math.round(barPx * nmPerPx)} 海里`, 0, -10);
-  ctx.restore();
-
-  // 小航海图：左上角，显示本船在全球海图上的大致位置（未探明处留白）
-  const mw = Math.max(150, Math.min(260, canvas.width * 0.17));
-  const mh = Math.round(mw * 0.72);
-  drawMinimap(ctx, 18, 18, mw, mh);
-  ctx.save();
-  ctx.fillStyle = 'rgba(24,20,13,.8)';
-  ctx.fillRect(18, 18 + mh, mw, 20);
-  ctx.fillStyle = '#e8dcbe'; ctx.textAlign = 'center';
-  ctx.font = `${Math.max(10, mw * 0.075)}px "DM Sans", sans-serif`;
-  ctx.fillText('航海图 · 红点为本船', 18 + mw / 2, 18 + mh + 14);
   ctx.restore();
 
   // 鼠标处的方位与距离提示

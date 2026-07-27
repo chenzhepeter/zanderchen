@@ -1,8 +1,11 @@
-// 全球海图（参考图，不能点击直航）：已探明处画出海岸线与港口，未探明处是空白羊皮纸。
-// 另提供小航海图（minimap）用于在航行视野里显示大致位置。
+// 全球海图（参考图，不能点击直航）：仿原版的格状海图——经纬网格 + 迷雾格，
+// 已探明处画出海岸线与港口，未探明处是空白羊皮纸。
+// 这是玩家唯一能确认自己身在何处的地方：航行视野里没有小地图。
 import { state } from './state.js';
 import { PORTS, NATIONS } from './data/ports.js';
-import { LAND_RINGS, project, VIEW_W, VIEW_H } from './geo.js';
+import { LAND_RINGS, project, VIEW_W, VIEW_H, LAT_MIN, LAT_MAX } from './geo.js';
+
+const LATN = LAT_MAX - 0.01, LATS = LAT_MIN + 0.01;
 import { eachCell, CELL, exploredRatio } from './fog.js';
 
 let canvas, ctx, raf = 0, C = null;
@@ -131,6 +134,38 @@ function draw() {
     ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
   });
 
+  // 经纬网格：格状海图的骨架（10° 一格，30° 加粗）
+  ctx.save();
+  ctx.lineWidth = 1 / C.k;
+  for (let lng = -180; lng <= 180; lng += 10) {
+    const a = project(lng, LATN), b = project(lng, LATS);
+    const major = lng % 30 === 0;
+    ctx.strokeStyle = major ? 'rgba(107,83,48,.45)' : 'rgba(107,83,48,.20)';
+    ctx.lineWidth = (major ? 1.6 : 0.9) / C.k;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (let lat = -70; lat <= 80; lat += 10) {
+    const a = project(-180, lat), b = project(180, lat);
+    const major = lat === 0 || Math.abs(lat) === 30 || Math.abs(lat) === 60;
+    ctx.strokeStyle = lat === 0 ? 'rgba(140,47,34,.5)' : major ? 'rgba(107,83,48,.45)' : 'rgba(107,83,48,.20)';
+    ctx.lineWidth = (major ? 1.6 : 0.9) / C.k;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  // 度数标注（贴着赤道与本初子午线，缩放时字号保持可读）
+  ctx.fillStyle = 'rgba(90,72,42,.75)';
+  ctx.font = `${11 / C.k + 3}px "DM Sans", sans-serif`;
+  ctx.textAlign = 'center';
+  for (let lng = -180; lng <= 180; lng += 30) {
+    const q = project(lng, 2);
+    ctx.fillText(`${Math.abs(lng)}°${lng === 0 ? '' : lng < 0 ? 'W' : 'E'}`, q.x, q.y - 3 / C.k);
+  }
+  ctx.textAlign = 'left';
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const q = project(2, lat);
+    ctx.fillText(`${Math.abs(lat)}°${lat === 0 ? '' : lat < 0 ? 'S' : 'N'}`, q.x + 4 / C.k, q.y - 3 / C.k);
+  }
+  ctx.restore();
+
   // 港口（只画已发现的）
   for (const p of PORTS) {
     if (!state.discovered.includes(p.id)) continue;
@@ -155,47 +190,9 @@ function draw() {
 
   // 图例
   ctx.fillStyle = 'rgba(24,20,13,.8)';
-  ctx.fillRect(12, canvas.height - 44, 300, 32);
+  ctx.fillRect(12, canvas.height - 44, 380, 32);
   ctx.fillStyle = '#f0e2bd';
   ctx.font = `${Math.max(12, canvas.width / 110)}px "DM Sans", sans-serif`;
   ctx.textAlign = 'left';
-  ctx.fillText(`已探明 ${(exploredRatio() * 100).toFixed(1)}% · 滚轮缩放 · 拖动平移`, 22, canvas.height - 23);
-}
-
-// ===== 小航海图：画进任意 canvas 2D 上下文的一角 =====
-export function drawMinimap(g, x, y, w, h) {
-  const sx = w / VIEW_W, sy = h / VIEW_H;
-  g.save();
-  g.translate(x, y);
-  g.fillStyle = 'rgba(239,227,194,.92)';
-  g.fillRect(0, 0, w, h);
-  g.strokeStyle = '#6b5330'; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
-  g.save();
-  g.beginPath(); g.rect(0, 0, w, h); g.clip();
-  g.scale(sx, sy);
-  // 已探明的海
-  g.fillStyle = '#a8c4cf';
-  eachCell((c, r, known, lngW, latN) => {
-    if (!known) return;
-    const a = project(lngW, latN), b = project(lngW + CELL, latN - CELL);
-    g.fillRect(a.x, a.y, b.x - a.x + 1, b.y - a.y + 1);
-  });
-  // 陆地轮廓（淡）
-  g.strokeStyle = 'rgba(122,99,56,.55)'; g.lineWidth = 1 / sx;
-  for (const ring of LAND_RINGS) {
-    g.beginPath();
-    let st = false;
-    for (const [lng, lat] of ring.pts) {
-      const p = project(lng, lat);
-      st ? g.lineTo(p.x, p.y) : (g.moveTo(p.x, p.y), st = true);
-    }
-    g.closePath(); g.stroke();
-  }
-  g.restore();
-  // 本船
-  const me = project(state.position.lng, state.position.lat);
-  g.fillStyle = '#8c2f22';
-  g.beginPath(); g.arc(me.x * sx, me.y * sy, 4, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = '#fff'; g.lineWidth = 1.2; g.stroke();
-  g.restore();
+  ctx.fillText(`已探明 ${(exploredRatio() * 100).toFixed(1)}% · 红圈是本船 · 滚轮缩放 · 拖动平移`, 22, canvas.height - 23);
 }
