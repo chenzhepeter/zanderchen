@@ -25,9 +25,6 @@ export function openTown(portId, callbacks) {
   canvas = document.getElementById('tcanvas');
   ctx = canvas.getContext('2d');
   T = buildTown(port);
-  document.getElementById('town').classList.remove('hidden');
-  document.getElementById('town-title').innerHTML =
-    `${NATIONS[port.nation].flag} <b>${port.name}</b> <span class="muted">${port.nameEn}</span>`;
   resize();
   window.addEventListener('resize', resize);
   canvas.addEventListener('pointerdown', onTap);
@@ -35,10 +32,11 @@ export function openTown(portId, callbacks) {
 }
 
 export function closeTown() {
-  document.getElementById('town').classList.add('hidden');
-  canvas.removeEventListener('pointerdown', onTap);
-  window.removeEventListener('resize', resize);
   cancelAnimationFrame(raf);
+  if (canvas) {
+    canvas.removeEventListener('pointerdown', onTap);
+    window.removeEventListener('resize', resize);
+  }
   T = null;
 }
 

@@ -1,234 +1,244 @@
-// 航行：海域网格 A* 寻路（不穿越陆地）、按日推进、补给消耗、遭遇判定
+// 航行（仿《大航海时代2》）：设定下一个航点后按日推进，沿途揭开迷雾、
+// 生成并移动附近的 NPC 船只、消耗补给、按月发薪。不再"点城市自动到达"。
 import { state, addLog, fleetSpeed, fleetCrew } from './state.js';
-import { isSea, distanceNm, bearing, windAt, windFactor, LNG_MIN, LNG_MAX, LAT_MIN, LAT_MAX } from './geo.js';
+import {
+  distanceNm, bearing, destPoint, windAt, windFactor, isSea, LAT_MIN, LAT_MAX,
+} from './geo.js';
 import { seaAt } from './data/coast.js';
-import { PORT_BY_ID } from './data/ports.js';
+import { PORTS, PORT_BY_ID } from './data/ports.js';
+import { reveal } from './fog.js';
 
-// ===== 海域网格（1° 分辨率）=====
-const STEP = 1;
-const COLS = Math.round((LNG_MAX - LNG_MIN) / STEP) + 1;
-const ROWS = Math.round((LAT_MAX - LAT_MIN) / STEP) + 1;
-let SEA = null;
+export const DAY_FACTOR = 0.72;       // 帆船不可能整日跑满船速
+export const SIGHT_NM = 150;          // 桅顶视距（迷雾揭开半径）
+// 入港判定距离：海岸线为 110m 精度，港口坐标常落在轮廓内侧，
+// 锚地（最近可通航点）离港中心可能有二三十海里，半径要覆盖得住。
+export const ENTER_PORT_NM = 45;
+export const MEET_NM = 12;            // 与他船相遇的距离
 
-function buildGrid() {
-  SEA = new Uint8Array(COLS * ROWS);
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      SEA[r * COLS + c] = isSea(LNG_MIN + c * STEP, LAT_MIN + r * STEP) ? 1 : 0;
-    }
-  }
-}
-const cellOf = (lng, lat) => ({
-  c: Math.round((lng - LNG_MIN) / STEP),
-  r: Math.round((lat - LAT_MIN) / STEP),
-});
-const llOf = (c, r) => ({ lng: LNG_MIN + c * STEP, lat: LAT_MIN + r * STEP });
-const inGrid = (c, r) => c >= 0 && c < COLS && r >= 0 && r < ROWS;
-const isSeaCell = (c, r) => inGrid(c, r) && SEA[r * COLS + c] === 1;
-
-// 港口在岸上：取最近的可通航格作为出入口
-function nearestSeaCell(lng, lat, maxR = 6) {
-  if (!SEA) buildGrid();
-  const { c, r } = cellOf(lng, lat);
-  if (isSeaCell(c, r)) return { c, r };
-  for (let rad = 1; rad <= maxR; rad++) {
-    for (let dc = -rad; dc <= rad; dc++) {
-      for (let dr = -rad; dr <= rad; dr++) {
-        if (Math.max(Math.abs(dc), Math.abs(dr)) !== rad) continue;
-        if (isSeaCell(c + dc, r + dr)) return { c: c + dc, r: r + dr };
-      }
-    }
-  }
-  return null;
-}
-
-// ===== A* =====
-export function planRoute(from, to) {
-  if (!SEA) buildGrid();
-  const s = nearestSeaCell(from.lng, from.lat);
-  const g = nearestSeaCell(to.lng, to.lat);
-  if (!s || !g) return null;
-
-  const key = (c, r) => r * COLS + c;
-  const open = new Map();       // key -> {c,r,g,f}
-  const came = new Map();
-  const gScore = new Map();
-  const h = (c, r) => distanceNm(llOf(c, r), llOf(g.c, g.r));
-
-  const startK = key(s.c, s.r);
-  gScore.set(startK, 0);
-  open.set(startK, { c: s.c, r: s.r, f: h(s.c, s.r) });
-
-  const NB = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-  let guard = 0;
-  while (open.size && guard++ < 60000) {
-    let bestK = null, best = null;
-    for (const [k, v] of open) if (!best || v.f < best.f) { best = v; bestK = k; }
-    open.delete(bestK);
-    if (best.c === g.c && best.r === g.r) {
-      // 回溯
-      const cells = [];
-      let k = bestK;
-      while (k !== undefined) { const c = k % COLS, r = (k - c) / COLS; cells.unshift({ c, r }); k = came.get(k); }
-      return simplify([from, ...cells.map(x => llOf(x.c, x.r)), to]);
-    }
-    for (const [dc, dr] of NB) {
-      const nc = best.c + dc, nr = best.r + dr;
-      if (!isSeaCell(nc, nr)) continue;
-      // 禁止斜穿陆角
-      if (dc && dr && (!isSeaCell(best.c + dc, best.r) || !isSeaCell(best.c, best.r + dr))) continue;
-      const step = distanceNm(llOf(best.c, best.r), llOf(nc, nr));
-      const ng = (gScore.get(key(best.c, best.r)) ?? Infinity) + step;
-      const nk = key(nc, nr);
-      if (ng < (gScore.get(nk) ?? Infinity)) {
-        gScore.set(nk, ng);
-        came.set(nk, key(best.c, best.r));
-        open.set(nk, { c: nc, r: nr, f: ng + h(nc, nr) });
-      }
-    }
-  }
-  return null;
-}
-
-// 去掉共线冗余点，让航线画出来更像手绘航路
-function simplify(pts) {
-  if (pts.length < 3) return pts;
-  const out = [pts[0]];
-  for (let i = 1; i < pts.length - 1; i++) {
-    const a = out[out.length - 1], b = pts[i], c = pts[i + 1];
-    const b1 = bearing(a, b), b2 = bearing(b, c);
-    if (Math.abs(((b1 - b2 + 540) % 360) - 180) < 172) out.push(b);   // 方位有明显变化才保留
-  }
-  out.push(pts[pts.length - 1]);
-  return out;
-}
-
-export function routeDistanceNm(path) {
-  let d = 0;
-  for (let i = 1; i < path.length; i++) d += distanceNm(path[i - 1], path[i]);
-  return d;
-}
-
-// ===== 出航 =====
-export function startVoyage(destPortId) {
-  const dest = PORT_BY_ID[destPortId];
-  if (!dest) return { ok: false, msg: '没有这个港口。' };
-  const path = planRoute(state.position, { lng: dest.lng, lat: dest.lat });
-  if (!path) return { ok: false, msg: '找不到通往那里的航路。' };
-  state.voyage = { path, idx: 0, destId: destPortId, days: 0, legDone: 0 };
+// ===== 航点 =====
+export function setWaypoint(lng, lat) {
+  if (!isSea(lng, lat)) return { ok: false, msg: '那里是陆地。' };
+  state.waypoint = { lng, lat };
+  state.heading = bearing(state.position, state.waypoint);
   state.atPort = null;
-  addLog(`起锚，目标：${dest.name}。航程约 ${routeDistanceNm(path)} 海里。`);
-  return { ok: true, path };
+  return { ok: true };
+}
+export function clearWaypoint() { state.waypoint = null; }
+
+// 找离给定点最近的可通航水域。港口在粗精度海岸线上常常"落在陆上"，
+// 出港/入港都要靠它把船放到真正的海面上。
+export function nearestSeaPoint(from, maxNm = 260) {
+  if (isSea(from.lng, from.lat)) return { ...from };
+  for (let nm = 5; nm <= maxNm; nm += 5) {
+    for (let b = 0; b < 360; b += 10) {
+      const t = destPoint(from, b, nm);
+      if (isSea(t.lng, t.lat)) return t;
+    }
+  }
+  return null;
 }
 
-export function abortVoyage() {
-  state.voyage = null;
-  addLog('改变主意，下令抛锚待命。');
+export function leavePort() {
+  const p = state.atPort ? PORT_BY_ID[state.atPort] : null;
+  state.atPort = null;
+  state.waypoint = null;
+  if (p) addLog(`离开${p.name}，驶向外海。`);
+  const sea = nearestSeaPoint(state.position);
+  if (sea) {
+    state.heading = bearing(state.position, sea) || state.heading || 270;
+    state.position = sea;
+  }
+  ensureNpcShips();
+  reveal(state.position.lng, state.position.lat, SIGHT_NM);
+}
+
+// 视野内可入港的港口
+export function portInReach() {
+  let best = null, bd = ENTER_PORT_NM;
+  for (const p of PORTS) {
+    const d = distanceNm(state.position, p);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+
+export function enterPort(portId) {
+  const p = PORT_BY_ID[portId];
+  if (!p) return { ok: false, msg: '没有这个港口。' };
+  if (distanceNm(state.position, p) > ENTER_PORT_NM) return { ok: false, msg: '离港口还太远。' };
+  state.position = { lng: p.lng, lat: p.lat };
+  state.atPort = p.id;
+  state.waypoint = null;
+  state.npcShips = [];
+  refillWater();
+  const isNew = !state.discovered.includes(p.id);
+  if (isNew) state.discovered.push(p.id);
+  reveal(p.lng, p.lat, SIGHT_NM);
+  addLog(`进入${p.name}港。`);
+  return { ok: true, isNew, port: p };
+}
+
+// ===== NPC 船只（近海视野里能看见的其他船）=====
+export function ensureNpcShips() {
+  if (!state.npcShips) state.npcShips = [];
+  const sea = seaAt(state.position.lng, state.position.lat);
+  const want = 2 + Math.round((sea.danger || 1) * 0.8);
+  let guard = 0;
+  while (state.npcShips.length < want && guard++ < 40) {
+    const brg = Math.random() * 360;
+    const nm = 60 + Math.random() * 160;
+    const p = destPoint(state.position, brg, nm);
+    if (!isSea(p.lng, p.lat)) continue;
+    const patrol = Math.random() < 0.25 + (state.player.infamy > 40 ? 0.2 : 0);
+    state.npcShips.push({
+      id: 'n' + Math.random().toString(36).slice(2, 8),
+      kind: patrol ? 'patrol' : 'merchant',
+      lng: p.lng, lat: p.lat,
+      heading: Math.random() * 360,
+      speed: patrol ? 8 : 6,
+      strength: patrol ? 1 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2),
+    });
+  }
+}
+
+function moveNpcShips(days = 1) {
+  const out = [];
+  for (const s of state.npcShips || []) {
+    // 巡逻舰在你恶名高时会主动靠过来
+    if (s.kind === 'patrol' && state.player.infamy > 40) {
+      s.heading = bearing(s, state.position);
+    } else if (Math.random() < 0.35) {
+      s.heading = (s.heading + (Math.random() * 80 - 40) + 360) % 360;
+    }
+    let nxt = destPoint(s, s.heading, s.speed * 24 * DAY_FACTOR * days);
+    if (!isSea(nxt.lng, nxt.lat)) {
+      s.heading = (s.heading + 120) % 360;
+      nxt = destPoint(s, s.heading, s.speed * 12 * days);
+    }
+    if (isSea(nxt.lng, nxt.lat)) { s.lng = nxt.lng; s.lat = nxt.lat; }
+    // 跑太远的移出视野，之后再补新的
+    if (distanceNm(state.position, s) < 420) out.push(s);
+  }
+  state.npcShips = out;
+  ensureNpcShips();
+}
+
+// 距离最近的他船（用于遭遇；返回的距离决定海战初始间隔）
+export function nearestShip() {
+  let best = null, bd = Infinity;
+  for (const s of state.npcShips || []) {
+    const d = distanceNm(state.position, s);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best ? { ship: best, nm: bd } : null;
 }
 
 // ===== 按日推进 =====
-// 返回 { arrived?, portId?, encounter?, msg }
 export function advanceDay() {
-  const v = state.voyage;
   const crew = fleetCrew();
   const res = { events: [] };
-
-  // 时钟
+  const prevMonth = state.date.m;
   tickDate();
-  if (v) v.days++;
 
-  // 补给消耗（每 20 名船员每天各耗 1 单位）
-  //  · 淡水：到港自动补满（免费），海上逐日消耗
-  //  · 粮食：就是货舱里的「粮食」货物，需在市场购买
-  // 只在海上消耗：靠港期间船员在岸上吃住，不啃船上的存粮
-  // 消耗率：每 10 名船员每天 1 单位（开局 10 人 + 50 粮 ≈ 够 50 天）
+  // 补给：粮食来自货舱，淡水靠港补满
   const rate = Math.max(1, Math.ceil(crew / 10));
-  if (!state.atPort) {
-    state.supplies.water = Math.max(0, state.supplies.water - rate);
-    const ate = eatGrain(rate);
-    if (ate < rate || state.supplies.water <= 0) {
-      state.crewMorale -= 6;
-      res.events.push({
-        type: 'starve',
-        msg: ate < rate ? '粮食吃光了，船员开始啃缆绳上的皮革。' : '淡水见底，喉咙里像塞了沙子。',
-      });
-    } else if (state.crewMorale < 100) {
-      state.crewMorale = Math.min(100, state.crewMorale + 0.5);
-    }
+  state.supplies.water = Math.max(0, state.supplies.water - rate);
+  const ate = eatGrain(rate);
+  if (ate < rate || state.supplies.water <= 0) {
+    state.crewMorale -= 6;
+    res.events.push({
+      type: 'starve',
+      msg: ate < rate ? '粮食吃光了，船员开始啃缆绳上的皮革。' : '淡水见底，喉咙里像塞了沙子。',
+    });
   } else if (state.crewMorale < 100) {
-    state.crewMorale = Math.min(100, state.crewMorale + 1.5);   // 靠港休整，士气回升更快
+    state.crewMorale = Math.min(100, state.crewMorale + 0.5);
   }
   state.crewMorale = Math.max(0, Math.min(100, state.crewMorale));
 
-  // 哗变判定
+  // 月初发薪
+  if (state.date.m !== prevMonth) {
+    const w = payWages();
+    if (w) res.events.push(w);
+    res.newMonth = true;
+  }
+
   if (state.crewMorale <= 12 && Math.random() < 0.25) {
     res.events.push({ type: 'mutiny', msg: '士气崩溃——甲板下传来磨刀的声音。' });
   }
 
-  if (!v) return res;
-
-  // 航行位移。DAY_FACTOR：帆船不可能整日跑满船速（换舷、夜航减帆、洋流），
-  // 取 0.72 让横渡大西洋约 20-25 天，既贴近史实又不至于让玩家点太多次。
-  const DAY_FACTOR = 0.72;
+  // 位移：朝航点前进
   const wind = windAt(state.position.lng, state.position.lat, state.date.m);
-  let remain = fleetSpeed() * 24 * DAY_FACTOR * windFactor(courseNow(), wind);   // 海里/天
   res.wind = wind;
-  res.nm = Math.round(remain);
-
-  while (remain > 0 && v.idx < v.path.length - 1) {
-    const cur = state.position, next = v.path[v.idx + 1];
-    const seg = distanceNm(cur, next);
-    const left = seg - v.legDone;
-    if (remain >= left) {
-      remain -= left;
-      state.position = { ...next };
-      v.idx++; v.legDone = 0;
+  if (state.waypoint) {
+    const course = bearing(state.position, state.waypoint);
+    state.heading = course;
+    let run = fleetSpeed() * 24 * DAY_FACTOR * windFactor(course, wind);
+    res.nm = Math.round(run);
+    const left = distanceNm(state.position, state.waypoint);
+    if (run >= left) {
+      state.position = { ...state.waypoint };
+      state.waypoint = null;
+      res.reachedWaypoint = true;
     } else {
-      // 沿当前航段按已走比例线性插值
-      v.legDone += remain;
-      const t = v.legDone / seg;
-      const p0 = v.path[v.idx];
-      state.position = {
-        lng: p0.lng + (next.lng - p0.lng) * t,
-        lat: p0.lat + (next.lat - p0.lat) * t,
-      };
-      remain = 0;
+      // 沿途绕开陆地：撞岸就试着偏转
+      let moved = false;
+      for (const off of [0, 20, -20, 40, -40, 60, -60, 90, -90]) {
+        const cand = destPoint(state.position, course + off, run);
+        if (isSea(cand.lng, cand.lat)) { state.position = cand; moved = true; break; }
+      }
+      if (!moved) { res.events.push({ type: 'blocked', msg: '前方是陆地，船只得停下来另寻航路。' }); state.waypoint = null; }
     }
+    state.position.lat = Math.max(LAT_MIN + 1, Math.min(LAT_MAX - 1, state.position.lat));
+  } else {
+    res.nm = 0;
   }
 
-  // 抵达
-  if (v.idx >= v.path.length - 1) {
-    const p = PORT_BY_ID[v.destId];
-    state.position = { lng: p.lng, lat: p.lat };
-    state.atPort = p.id;
-    state.voyage = null;
-    refillWater();
-    res.events.push({ type: 'water', msg: '靠港补足了淡水。' });
-    if (!state.discovered.includes(p.id)) {
-      state.discovered.push(p.id);
-      res.events.push({ type: 'discover', msg: `发现新港口：${p.name}！` });
-    }
-    addLog(`抵达 ${p.name}。`);
-    res.arrived = p.id;
-    return res;
-  }
+  reveal(state.position.lng, state.position.lat, SIGHT_NM);
+  moveNpcShips(1);
 
-  // 遭遇判定
+  // 相遇：有船贴到 MEET_NM 之内
+  const near = nearestShip();
+  if (near && near.nm <= MEET_NM) res.encounter = { ...near.ship, nm: near.nm };
+
+  // 天气
   const sea = seaAt(state.position.lng, state.position.lat);
-  const p = 0.06 + sea.danger * 0.035;
-  if (Math.random() < p) res.encounter = rollEncounter(sea);
+  if (state.waypoint && Math.random() < 0.035 + (sea.danger || 1) * 0.012) {
+    res.weather = 'storm';
+  }
   return res;
 }
 
-// 淡水按船员规模自动补满（靠港免费）
-export function waterCapacity() {
-  return Math.max(60, fleetCrew() * 3);
+// ===== 工资 =====
+export function monthlyWage() {
+  const crew = fleetCrew();
+  const officers = (state.officers || []).length;
+  return crew * 3 + officers * 60;         // 每名水手 3 金/月，伙伴 60 金/月
 }
-export function refillWater() {
-  state.supplies.water = waterCapacity();
+function payWages() {
+  const due = monthlyWage();
+  if (due <= 0) return null;
+  if (state.player.gold >= due) {
+    state.player.gold -= due;
+    addLog(`月初发薪：支付 ${due} 金币（船员 ${fleetCrew()} 人）。`);
+    state.crewMorale = Math.min(100, state.crewMorale + 2);
+    return { type: 'wage', msg: `发放月薪 ${due} 金币。` };
+  }
+  // 发不出工资：士气暴跌 + 逃亡
+  state.crewMorale -= 22;
+  let flee = Math.max(1, Math.round(fleetCrew() * 0.12));
+  const lost = flee;
+  for (const s of state.fleet) {
+    const t = Math.min(s.crew - 1, flee);
+    if (t > 0) { s.crew -= t; flee -= t; }
+    if (flee <= 0) break;
+  }
+  addLog(`发不出月薪，${lost} 名船员趁夜溜了。`);
+  return { type: 'wageFail', msg: `付不出 ${due} 金币的月薪！士气暴跌，${lost} 人逃亡。` };
 }
 
-// 从货舱吃掉粮食，返回实际吃到的数量
+// ===== 补给 =====
+export function waterCapacity() { return Math.max(60, fleetCrew() * 3); }
+export function refillWater() { state.supplies.water = waterCapacity(); }
 function eatGrain(need) {
   let left = need;
   for (const s of state.fleet) {
@@ -244,24 +254,6 @@ function eatGrain(need) {
 }
 export function grainOnBoard() {
   return state.fleet.reduce((a, s) => a + (s.cargo.grain || 0), 0);
-}
-
-function courseNow() {
-  const v = state.voyage;
-  if (!v || v.idx >= v.path.length - 1) return 0;
-  return bearing(state.position, v.path[v.idx + 1]);
-}
-
-function rollEncounter(sea) {
-  const r = Math.random();
-  const infamous = state.player.infamy > 40;
-  if (r < 0.12) return { kind: 'storm', sea: sea.id, name: '风暴' };
-  if (r < 0.24) return { kind: 'derelict', sea: sea.id, name: '漂流船' };
-  if (r < 0.34) return { kind: 'island', sea: sea.id, name: '无名小岛' };
-  if (r < 0.5 + (infamous ? 0.15 : 0)) {
-    return { kind: 'patrol', sea: sea.id, name: '巡逻舰', strength: sea.patrol };
-  }
-  return { kind: 'merchant', sea: sea.id, name: '商船', strength: Math.max(1, sea.danger - 1) };
 }
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];

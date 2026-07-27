@@ -28,10 +28,15 @@ export function startBattle(enc, onEnd) {
 
   B = { enc, wind, origin, land: new Map(), units: [], turn: 1, order: [], oi: 0, log: [], reach: [], captured: [] };
 
-  // 出生点：在原点附近找可通航格，玩家在西、敌方在东
+  // 初始间距取自海图上发起攻击时的实际距离：贴上去就是贴身战，远远发现就要先追
+  // enc.nm 为遭遇时的海里数；每格约 3 海里（TILE_DEG=0.05°）
+  const sepTiles = Math.max(1, Math.min(9, Math.round((enc.nm ?? 12) / 3)));
+  B.sep = sepTiles;
+
+  // 出生点：玩家在西、敌方在东，按 sepTiles 分开
   state.fleet.forEach((s, i) => {
     const st = shipStat(s);
-    const pos = freeCell(-6, (i - (state.fleet.length - 1) / 2) * 2);
+    const pos = freeCell(-Math.ceil(sepTiles / 2), (i - (state.fleet.length - 1) / 2) * 2);
     B.units.push({
       id: 'p' + i, side: 'p', ref: s.uid, name: s.name, typeId: s.typeId,
       hull: s.hull, hullMax: st.hullMax, armor: st.armor, guns: st.guns,
@@ -40,14 +45,14 @@ export function startBattle(enc, onEnd) {
     });
   });
   makeEnemies(enc).forEach((e, i) => {
-    const pos = freeCell(6, (i - 1) * 2);
+    const pos = freeCell(Math.ceil(sepTiles / 2), (i - 1) * 2);
     B.units.push(Object.assign(e, {
       id: 'e' + i, side: 'e', ...pos, heading: 6,
       ammo: 'round', moved: false, acted: false, alive: true, fled: false,
     }));
   });
 
-  pushLog('sys', `遭遇战开始 · ${wind.name}`);
+  pushLog('sys', `遭遇战开始 · ${wind.name} · 接敌距离约 ${enc.nm ?? 12} 海里`);
   newRound();
   document.getElementById('battle').classList.remove('hidden');
   resize();

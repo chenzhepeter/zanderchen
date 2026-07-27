@@ -6,7 +6,7 @@ import { PORTS } from './data/ports.js';
 import { GOODS, GOOD_BY_ID } from './data/goods.js';
 
 // 版本号：北京日期 + 当天提交序号（由 .githooks/pre-commit 自动更新）
-export const APP_VERSION = '2026.7.25.3';
+export const APP_VERSION = '2026.7.27.1';
 export const SAVE_VERSION = 1;
 export const STORAGE_KEY = 'blackbeard.save';
 export const SLOT_KEY = (i) => `blackbeard.slot.${i}`;
@@ -36,7 +36,11 @@ export const state = {
   supplies: { water: 60 },  // 粮食改为货舱里的 grain 货物；淡水靠港免费补满
   position: { lng: -2.59, lat: 51.45 },
   atPort: 'BRISTOL',
-  voyage: null,            // { path:[{lng,lat}], idx, destId, days }
+  view: 'port',            // 'port' 港口主视野 | 'sail' 近海航行视野
+  heading: 270,            // 航向（度）
+  waypoint: null,          // 下一个航点 {lng,lat}
+  npcShips: [],            // 近海视野里的其他船
+  fog: null,               // 迷雾：已探明格 { key: 1 }
   officers: [],            // 已招募 officer id
   quests: null,            // { active:[{id,since}], done:[id], counters:{} }
   flags: {},               // 剧情旗标
@@ -117,7 +121,11 @@ export function initNewGame() {
     supplies: { water: 60 },
     position: { lng: -2.59, lat: 51.45 },
     atPort: 'BRISTOL',
-    voyage: null,
+    view: 'port',
+    heading: 270,
+    waypoint: null,
+    npcShips: [],
+    fog: {},
     officers: [],
     quests: { active: [], done: [], counters: { wins: 0, winsMerchant: 0, winsPatrol: 0 } },
     flags: {},
@@ -164,7 +172,9 @@ function buildPayload() {
       date: state.date, chapter: state.chapter, player: state.player,
       fleet: state.fleet, flagship: state.flagship, crewMorale: state.crewMorale,
       supplies: state.supplies, position: state.position, atPort: state.atPort,
-      voyage: state.voyage, officers: state.officers, quests: state.quests, flags: state.flags,
+      view: state.view, heading: state.heading, waypoint: state.waypoint,
+      npcShips: state.npcShips, fog: state.fog,
+      officers: state.officers, quests: state.quests, flags: state.flags,
       discovered: state.discovered, portState: state.portState,
       activeEffects: state.activeEffects, eventLog: state.eventLog,
       pendingEvent: state.pendingEvent, pendingDialog: state.pendingDialog,

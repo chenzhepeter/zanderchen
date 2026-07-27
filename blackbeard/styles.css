@@ -61,11 +61,38 @@ button { font-family: inherit; cursor: pointer; }
 .primary-btn:disabled, .ghost-btn:disabled { opacity: .45; cursor: not-allowed; }
 .big { padding: 15px 28px; font-size: 17px; }
 
-/* ===== 游戏布局 ===== */
-.game { display: flex; }
-.chart-wrap { position: relative; flex: 1; min-width: 0; background: #16130d; }
-#chart { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
-#chart:active { cursor: grabbing; }
+/* ===== 游戏布局：全屏视野 + 顶部信息条 + 底部指令栏 ===== */
+.game { position: relative; overflow: hidden; background: #10131a; }
+.view-stage { position: absolute; inset: 0; }
+.view-stage canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+#view-sail canvas { cursor: crosshair; }
+#view-port canvas { cursor: pointer; }
+
+/* 底部指令栏 */
+.cmdbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  padding: 10px max(14px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  background: linear-gradient(to top, rgba(12,16,22,.92), rgba(12,16,22,.62) 70%, transparent);
+}
+.cmd-btn {
+  background: linear-gradient(to bottom, rgba(70,60,40,.95), rgba(46,38,24,.95));
+  border: 1px solid rgba(200,170,110,.45); color: #f0e2bd;
+  border-radius: 10px; padding: 11px 16px; font-size: 14.5px; font-weight: 600;
+  font-family: 'Noto Serif SC', serif;
+}
+.cmd-btn:hover { filter: brightness(1.15); }
+.cmd-btn:active { transform: scale(.97); }
+.cmd-btn.primary { background: linear-gradient(to bottom, #a8451f, #7d2f16); border-color: #5e2410; }
+.cmd-btn:disabled { opacity: .4; }
+.cmd-spacer { flex: 1; }
+.cmd-hint { font-size: 12.5px; color: #b9a271; }
+
+/* 侧栏面板：改为滑入式覆盖层 */
+.panel.slide {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 8;
+  width: min(420px, 94vw); border-left: 3px solid #6b5330;
+}
 
 .hud {
   position: absolute; top: 0; left: 0; right: 0;
@@ -184,22 +211,22 @@ button { font-family: inherit; cursor: pointer; }
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* ===== 城镇小地图 ===== */
-.town { position: fixed; inset: 0; z-index: 38; background: #2a2418; display: flex; flex-direction: column; }
-.town-bar {
+/* ===== 全球海图（参考图 + 迷雾） ===== */
+.chartview { position: fixed; inset: 0; z-index: 30; background: #12100a; display: flex; flex-direction: column; }
+.chart-bar {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: max(10px, env(safe-area-inset-top)) 16px 10px;
-  background: rgba(24,20,13,.94); color: #f0e2bd; border-bottom: 2px solid #6b5330;
+  background: rgba(24,20,13,.95); color: #f0e2bd; border-bottom: 2px solid #6b5330;
 }
-.town-bar b { font-size: 17px; }
-.town-tip { font-size: 12.5px; color: #b9a271; flex: 1; }
-.town-bar .ghost-btn { padding: 8px 14px; font-size: 13px; }
-.town-stage { flex: 1; min-height: 0; }
-#tcanvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+.chart-bar b { font-size: 17px; }
+.chart-bar .muted { flex: 1; color: #b9a271; }
+.chart-stage { flex: 1; min-height: 0; }
+#cchart { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#cchart:active { cursor: grabbing; }
 
-/* 城镇内的设施面板（就地打开，不回大地图） */
+/* 港口内的设施面板 */
 .town-panel {
-  position: absolute; top: 59px; right: 0; bottom: 0; width: min(440px, 92vw);
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(440px, 92vw); z-index: 9;
   background: var(--parch); border-left: 3px solid #6b5330;
   display: flex; flex-direction: column; z-index: 5;
   box-shadow: -14px 0 40px rgba(0,0,0,.45);

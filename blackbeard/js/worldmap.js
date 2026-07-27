@@ -1,310 +1,201 @@
-// 古地图海图渲染：静态层（海岸线/港口）与动态层（船只/航线）分离，支持缩放平移。
-// 与 airline/js/map.js 的关键差异：那里每次 rerender 清空重建整个内容层，
-// 与逐帧船只动画不兼容；这里静态层只在数据变化时重建，船只节点持久化、只改 transform。
-import { LANDS } from './data/coast.js';
+// 全球海图（参考图，不能点击直航）：已探明处画出海岸线与港口，未探明处是空白羊皮纸。
+// 另提供小航海图（minimap）用于在航行视野里显示大致位置。
+import { state } from './state.js';
 import { PORTS, NATIONS } from './data/ports.js';
-import { project, unproject, VIEW_W, VIEW_H } from './geo.js';
+import { LAND_RINGS, project, VIEW_W, VIEW_H } from './geo.js';
+import { eachCell, CELL, exploredRatio } from './fog.js';
 
-const NS = 'http://www.w3.org/2000/svg';
-const el = (tag, attrs = {}) => {
-  const n = document.createElementNS(NS, tag);
-  for (const k in attrs) n.setAttribute(k, attrs[k]);
-  return n;
-};
+let canvas, ctx, raf = 0, C = null;
 
-let svg = null, vp = null;
-let layerLand, layerRoute, layerPorts, layerShips, layerFx;
-let view = { k: 1, tx: 0, ty: 0 };
-let portNodes = {};      // portId -> <g>
-let shipNode = null;
-let cb = {};
-
-export function initMap(target, callbacks = {}) {
-  cb = callbacks;
-  svg = target;
-  svg.setAttribute('viewBox', `0 0 ${VIEW_W} ${VIEW_H}`);
-  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  svg.innerHTML = '';
-
-  // —— 羊皮纸 / 做旧滤镜 ——
-  const defs = el('defs');
-  defs.innerHTML = `
-    <filter id="parch" x="0" y="0" width="100%" height="100%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" seed="7" result="n"/>
-      <feColorMatrix in="n" type="saturate" values="0"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.10"/></feComponentTransfer>
-      <feComposite operator="over" in2="SourceGraphic"/>
-    </filter>
-    <filter id="softInk"><feGaussianBlur stdDeviation="0.7"/></filter>
-    <radialGradient id="seaGrad" cx="45%" cy="40%" r="75%">
-      <stop offset="0%" stop-color="#cfe0e6"/><stop offset="100%" stop-color="#a8c4cf"/>
-    </radialGradient>
-    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
-      <line x1="0" y1="0" x2="0" y2="6" stroke="#9a7f55" stroke-width="0.8" opacity="0.35"/>
-    </pattern>`;
-  svg.appendChild(defs);
-
-  // 海面底
-  svg.appendChild(el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#seaGrad)' }));
-
-  vp = el('g', { id: 'vp' });
-  svg.appendChild(vp);
-
-  layerLand = el('g', { id: 'lay-land' });
-  layerRoute = el('g', { id: 'lay-route' });
-  layerPorts = el('g', { id: 'lay-ports' });
-  layerShips = el('g', { id: 'lay-ships' });
-  layerFx = el('g', { id: 'lay-fx' });
-  vp.append(layerLand, layerRoute, layerPorts, layerShips, layerFx);
-
-  // 羊皮纸做旧覆盖 + 图廓
-  svg.appendChild(el('rect', {
-    x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: '#c9a227', opacity: 0.07,
-    'pointer-events': 'none',
-  }));
-  svg.appendChild(el('rect', {
-    x: 4, y: 4, width: VIEW_W - 8, height: VIEW_H - 8, fill: 'none',
-    stroke: '#6b5330', 'stroke-width': 3, opacity: 0.55, 'pointer-events': 'none',
-  }));
-
-  drawLand();
-  drawGraticule();
-  drawCompass();
-  drawPorts();
-  bindInteractions();
-  applyView();
-  return { project, unproject };
+export function openChart() {
+  canvas = document.getElementById('cchart');
+  ctx = canvas.getContext('2d');
+  C = { k: 1, tx: 0, ty: 0, drag: null };
+  resize();
+  window.addEventListener('resize', resize);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  centerOnShip();
+  loop();
+}
+export function closeChart() {
+  cancelAnimationFrame(raf);
+  if (!canvas) return;
+  canvas.removeEventListener('wheel', onWheel);
+  canvas.removeEventListener('pointerdown', onDown);
+  canvas.removeEventListener('pointermove', onMove);
+  canvas.removeEventListener('pointerup', onUp);
+  window.removeEventListener('resize', resize);
+  C = null;
 }
 
-// ===== 静态层 =====
-function ringToPath(ring) {
-  return ring.map((p, i) => {
-    const q = project(p[0], p[1]);
-    return `${i ? 'L' : 'M'}${q.x.toFixed(1)},${q.y.toFixed(1)}`;
-  }).join('') + 'Z';
+function resize() {
+  if (!canvas) return;
+  const wrap = canvas.parentElement;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(wrap.clientWidth * dpr);
+  canvas.height = Math.round(wrap.clientHeight * dpr);
+  canvas.style.width = wrap.clientWidth + 'px';
+  canvas.style.height = wrap.clientHeight + 'px';
 }
 
-function drawLand() {
-  layerLand.innerHTML = '';
-  for (const L of LANDS) {
-    const d = ringToPath(L.ring);
-    // 海岸晕线（古地图风）
-    layerLand.appendChild(el('path', {
-      d, fill: 'none', stroke: '#8a6d3f', 'stroke-width': 5, opacity: 0.22, filter: 'url(#softInk)',
-    }));
-    layerLand.appendChild(el('path', { d, fill: '#e8dcbe', stroke: '#6b5330', 'stroke-width': 1.1 }));
-    layerLand.appendChild(el('path', { d, fill: 'url(#hatch)', stroke: 'none', opacity: 0.5 }));
+function baseScale() { return Math.min(canvas.width / VIEW_W, canvas.height / VIEW_H); }
+function centerOnShip() {
+  const p = project(state.position.lng, state.position.lat);
+  C.k = 2.2;
+  const s = baseScale() * C.k;
+  C.tx = canvas.width / 2 - p.x * s;
+  C.ty = canvas.height / 2 - p.y * s;
+  clamp();
+}
+function clamp() {
+  const s = baseScale() * C.k;
+  const w = VIEW_W * s, h = VIEW_H * s;
+  C.tx = w <= canvas.width ? (canvas.width - w) / 2 : Math.max(canvas.width - w, Math.min(0, C.tx));
+  C.ty = h <= canvas.height ? (canvas.height - h) / 2 : Math.max(canvas.height - h, Math.min(0, C.ty));
+}
+function onWheel(e) {
+  e.preventDefault();
+  const before = C.k;
+  C.k = Math.max(1, Math.min(8, C.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  const r = canvas.getBoundingClientRect();
+  const mx = (e.clientX - r.left) * (canvas.width / r.width);
+  const my = (e.clientY - r.top) * (canvas.height / r.height);
+  const f = C.k / before;
+  C.tx = mx - (mx - C.tx) * f;
+  C.ty = my - (my - C.ty) * f;
+  clamp();
+}
+function onDown(e) { C.drag = { x: e.clientX, y: e.clientY }; }
+function onMove(e) {
+  if (!C || !C.drag) return;
+  const r = canvas.getBoundingClientRect();
+  const sc = canvas.width / r.width;
+  C.tx += (e.clientX - C.drag.x) * sc;
+  C.ty += (e.clientY - C.drag.y) * sc;
+  C.drag = { x: e.clientX, y: e.clientY };
+  clamp();
+}
+function onUp() { if (C) C.drag = null; }
+
+function loop() { if (!C) return; draw(); raf = requestAnimationFrame(loop); }
+
+function draw() {
+  const s = baseScale() * C.k;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#1a160f';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(C.tx, C.ty); ctx.scale(s, s);
+
+  // 羊皮纸底
+  ctx.fillStyle = '#efe3c2';
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  // 海（只在已探明处显示为水色）
+  ctx.fillStyle = '#a8c4cf';
+  eachCell((c, r, known, lngW, latN) => {
+    if (!known) return;
+    const a = project(lngW, latN), b = project(lngW + CELL, latN - CELL);
+    ctx.fillRect(a.x, a.y, b.x - a.x + 0.6, b.y - a.y + 0.6);
+  });
+
+  // 陆地（裁剪到已探明区域）
+  ctx.save();
+  ctx.beginPath();
+  eachCell((c, r, known, lngW, latN) => {
+    if (!known) return;
+    const a = project(lngW, latN), b = project(lngW + CELL, latN - CELL);
+    ctx.rect(a.x, a.y, b.x - a.x + 0.6, b.y - a.y + 0.6);
+  });
+  ctx.clip();
+  for (const ring of LAND_RINGS) {
+    ctx.beginPath();
+    let started = false;
+    for (const [lng, lat] of ring.pts) {
+      const p = project(lng, lat);
+      started ? ctx.lineTo(p.x, p.y) : (ctx.moveTo(p.x, p.y), started = true);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#e0d3ac'; ctx.fill();
+    ctx.strokeStyle = '#7a6338'; ctx.lineWidth = 1.2 / C.k; ctx.stroke();
   }
-}
+  ctx.restore();
 
-function drawGraticule() {
-  const g = el('g', { opacity: 0.18, 'pointer-events': 'none' });
-  for (let lng = -100; lng <= 20; lng += 20) {
-    const a = project(lng, 60), b = project(lng, -12);
-    g.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#5c4a2e', 'stroke-width': 0.6, 'stroke-dasharray': '3 5' }));
-  }
-  for (let lat = -10; lat <= 60; lat += 10) {
-    const a = project(-100, lat), b = project(20, lat);
-    g.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#5c4a2e', 'stroke-width': 0.6, 'stroke-dasharray': '3 5' }));
-  }
-  // 北回归线标注
-  const tc = project(-98, 23.44);
-  const t = el('text', { x: tc.x, y: tc.y - 3, fill: '#5c4a2e', 'font-size': 9, opacity: 0.75, 'font-style': 'italic' });
-  t.textContent = '北回归线 · Tropic of Cancer';
-  g.appendChild(t);
-  layerLand.appendChild(g);
-}
+  // 迷雾边界的做旧笔触
+  ctx.strokeStyle = 'rgba(120,96,54,.28)'; ctx.lineWidth = 1 / C.k;
+  eachCell((c, r, known, lngW, latN) => {
+    if (!known) return;
+    const a = project(lngW, latN), b = project(lngW + CELL, latN - CELL);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  });
 
-function drawCompass() {
-  const c = project(-93, 3);
-  const g = el('g', { transform: `translate(${c.x},${c.y})`, opacity: 0.72, 'pointer-events': 'none' });
-  g.appendChild(el('circle', { r: 30, fill: 'none', stroke: '#6b5330', 'stroke-width': 1 }));
-  g.appendChild(el('circle', { r: 22, fill: 'none', stroke: '#6b5330', 'stroke-width': 0.6, 'stroke-dasharray': '2 3' }));
-  for (let i = 0; i < 8; i++) {
-    const a = i * Math.PI / 4, long = i % 2 === 0;
-    const r1 = long ? 30 : 20;
-    g.appendChild(el('polygon', {
-      points: `0,0 ${Math.sin(a - 0.1) * r1},${-Math.cos(a - 0.1) * r1} ${Math.sin(a) * r1 * 1.05},${-Math.cos(a) * r1 * 1.05} ${Math.sin(a + 0.1) * r1},${-Math.cos(a + 0.1) * r1}`,
-      fill: i === 0 ? '#8c2f22' : '#6b5330', opacity: long ? 0.9 : 0.5,
-    }));
-  }
-  const n = el('text', { x: 0, y: -34, 'text-anchor': 'middle', fill: '#8c2f22', 'font-size': 11, 'font-weight': 'bold' });
-  n.textContent = 'N';
-  g.appendChild(n);
-  layerLand.appendChild(g);
-}
-
-// ===== 港口层 =====
-export function drawPorts(stateRef) {
-  layerPorts.innerHTML = '';
-  portNodes = {};
-  const discovered = stateRef?.discovered || null;
+  // 港口（只画已发现的）
   for (const p of PORTS) {
+    if (!state.discovered.includes(p.id)) continue;
     const q = project(p.lng, p.lat);
-    const known = !discovered || discovered.includes(p.id);
-    const g = el('g', {
-      class: 'map-port', 'data-id': p.id,
-      transform: `translate(${q.x.toFixed(1)},${q.y.toFixed(1)}) scale(${1 / view.k})`,
-      style: 'cursor:pointer',
-    });
-    const col = NATIONS[p.nation]?.color || '#444';
-    const r = 3 + p.size * 0.9;
-    if (p.pirateHaven) {
-      g.appendChild(el('circle', { r: r + 4, fill: 'none', stroke: '#2b2b2b', 'stroke-width': 1, 'stroke-dasharray': '2 2', opacity: 0.8 }));
-    }
-    // 海图上港口位置本就已知；"未访问"只是没去过（淡化 + 空心），不隐藏名字
-    g.appendChild(el('circle', {
-      r, fill: known ? col : '#f3e7c8', stroke: known ? '#3a2f1c' : col,
-      'stroke-width': known ? 1.2 : 1.6, 'stroke-dasharray': known ? '' : '2.5 2',
-    }));
-    if (known) g.appendChild(el('circle', { r: r * 0.4, fill: '#fdf6e3', opacity: 0.85 }));
-    const label = el('text', {
-      x: 0, y: -r - 5, 'text-anchor': 'middle', 'font-size': 11,
-      fill: '#3a2f1c', stroke: '#f3e7c8', 'stroke-width': 2.5, 'paint-order': 'stroke',
-      'font-weight': '600', style: 'pointer-events:none', opacity: known ? 1 : 0.62,
-    });
-    label.textContent = p.name;
-    g.appendChild(label);
-    const title = el('title');
-    title.textContent = `${p.name} · ${p.nameEn}（${NATIONS[p.nation].name}）${known ? '' : ' · 尚未到访'}`;
-    g.appendChild(title);
-    g.addEventListener('click', (e) => { e.stopPropagation(); cb.onPortClick && cb.onPortClick(p); });
-    layerPorts.appendChild(g);
-    portNodes[p.id] = g;
+    ctx.fillStyle = NATIONS[p.nation]?.color || '#444';
+    ctx.strokeStyle = '#2c2418'; ctx.lineWidth = 1.2 / C.k;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 4.5 / C.k + 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3a2f1c';
+    ctx.font = `${12 / C.k + 4}px "Noto Serif SC", serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(p.name, q.x, q.y - 8 / C.k - 4);
   }
+
+  // 本船位置
+  const me = project(state.position.lng, state.position.lat);
+  ctx.strokeStyle = '#8c2f22'; ctx.lineWidth = 2.4 / C.k;
+  ctx.beginPath(); ctx.arc(me.x, me.y, 10 / C.k + 3, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(me.x - 14 / C.k, me.y); ctx.lineTo(me.x + 14 / C.k, me.y);
+  ctx.moveTo(me.x, me.y - 14 / C.k); ctx.lineTo(me.x, me.y + 14 / C.k); ctx.stroke();
+
+  ctx.restore();
+
+  // 图例
+  ctx.fillStyle = 'rgba(24,20,13,.8)';
+  ctx.fillRect(12, canvas.height - 44, 300, 32);
+  ctx.fillStyle = '#f0e2bd';
+  ctx.font = `${Math.max(12, canvas.width / 110)}px "DM Sans", sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.fillText(`已探明 ${(exploredRatio() * 100).toFixed(1)}% · 滚轮缩放 · 拖动平移`, 22, canvas.height - 23);
 }
 
-// ===== 动态层：航线与船 =====
-export function drawRoute(path) {
-  layerRoute.innerHTML = '';
-  if (!path || path.length < 2) return;
-  const d = path.map((p, i) => {
-    const q = project(p.lng, p.lat);
-    return `${i ? 'L' : 'M'}${q.x.toFixed(1)},${q.y.toFixed(1)}`;
-  }).join('');
-  layerRoute.appendChild(el('path', { d, fill: 'none', stroke: '#8c2f22', 'stroke-width': 2, 'stroke-dasharray': '7 5', opacity: 0.85 }));
-  const last = project(path[path.length - 1].lng, path[path.length - 1].lat);
-  layerRoute.appendChild(el('circle', { cx: last.x, cy: last.y, r: 4, fill: 'none', stroke: '#8c2f22', 'stroke-width': 2 }));
-}
-export function clearRoute() { layerRoute.innerHTML = ''; }
-
-export function setShip(lng, lat, heading = 0, visible = true) {
-  if (!shipNode) {
-    shipNode = el('g', { id: 'own-ship', style: 'pointer-events:none' });
-    shipNode.appendChild(el('circle', { r: 9, fill: '#fdf6e3', opacity: 0.5 }));
-    const hull = el('path', {
-      d: 'M0,-9 L4.5,3 L0,6 L-4.5,3 Z', fill: '#8c2f22', stroke: '#3a2f1c', 'stroke-width': 1,
-    });
-    shipNode.appendChild(hull);
-    shipNode.appendChild(el('line', { x1: 0, y1: -4, x2: 0, y2: -12, stroke: '#3a2f1c', 'stroke-width': 1 }));
-    layerShips.appendChild(shipNode);
-  }
-  shipNode.style.display = visible ? '' : 'none';
-  const q = project(lng, lat);
-  shipNode.setAttribute('transform',
-    `translate(${q.x.toFixed(1)},${q.y.toFixed(1)}) scale(${1 / view.k}) rotate(${heading.toFixed(0)})`);
-}
-
-// 海上遭遇等临时标记
-export function pingAt(lng, lat, color = '#8c2f22') {
-  const q = project(lng, lat);
-  const c = el('circle', { cx: q.x, cy: q.y, r: 4, fill: 'none', stroke: color, 'stroke-width': 2 });
-  layerFx.appendChild(c);
-  let t = 0;
-  const tick = () => {
-    t += 0.05;
-    c.setAttribute('r', 4 + t * 30);
-    c.setAttribute('opacity', Math.max(0, 1 - t));
-    if (t < 1) requestAnimationFrame(tick); else c.remove();
-  };
-  requestAnimationFrame(tick);
-}
-
-// ===== 视口缩放/平移 =====
-function applyView() {
-  vp.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.k})`);
-  // 港口点与船只反向缩放，保持屏幕尺寸恒定
-  for (const id in portNodes) {
-    const p = PORTS.find(x => x.id === id);
-    const q = project(p.lng, p.lat);
-    portNodes[id].setAttribute('transform', `translate(${q.x.toFixed(1)},${q.y.toFixed(1)}) scale(${1 / view.k})`);
-  }
-  if (shipNode) {
-    const tr = shipNode.getAttribute('transform') || '';
-    const m = tr.match(/translate\(([-\d.]+),([-\d.]+)\).*rotate\(([-\d.]+)\)/);
-    if (m) shipNode.setAttribute('transform',
-      `translate(${m[1]},${m[2]}) scale(${1 / view.k}) rotate(${m[3]})`);
-  }
-}
-
-export function zoomTo(lng, lat, k = 2.4) {
-  const q = project(lng, lat);
-  view.k = k;
-  view.tx = VIEW_W / 2 - q.x * k;
-  view.ty = VIEW_H / 2 - q.y * k;
-  clampView(); applyView();
-}
-
-function clampView() {
-  view.k = Math.max(1, Math.min(6, view.k));
-  const minX = VIEW_W - VIEW_W * view.k, minY = VIEW_H - VIEW_H * view.k;
-  view.tx = Math.max(minX, Math.min(0, view.tx));
-  view.ty = Math.max(minY, Math.min(0, view.ty));
-}
-
-// 客户端坐标 → 图坐标（兼容高 DPR 与 letterbox）
-function toMap(clientX, clientY) {
-  const r = svg.getBoundingClientRect();
-  const scale = Math.min(r.width / VIEW_W, r.height / VIEW_H);
-  const ox = (r.width - VIEW_W * scale) / 2, oy = (r.height - VIEW_H * scale) / 2;
-  const mx = (clientX - r.left - ox) / scale, my = (clientY - r.top - oy) / scale;
-  return { x: (mx - view.tx) / view.k, y: (my - view.ty) / view.k };
-}
-
-function bindInteractions() {
-  let dragging = false, moved = 0, last = null;
-
-  svg.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const m = toMap(e.clientX, e.clientY);
-    const before = view.k;
-    view.k *= e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    view.k = Math.max(1, Math.min(6, view.k));
-    // 以光标为锚点缩放
-    view.tx -= m.x * (view.k - before);
-    view.ty -= m.y * (view.k - before);
-    clampView(); applyView();
-  }, { passive: false });
-
-  svg.addEventListener('pointerdown', (e) => {
-    dragging = true; moved = 0; last = { x: e.clientX, y: e.clientY };
-    svg.setPointerCapture(e.pointerId);
+// ===== 小航海图：画进任意 canvas 2D 上下文的一角 =====
+export function drawMinimap(g, x, y, w, h) {
+  const sx = w / VIEW_W, sy = h / VIEW_H;
+  g.save();
+  g.translate(x, y);
+  g.fillStyle = 'rgba(239,227,194,.92)';
+  g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#6b5330'; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
+  g.save();
+  g.beginPath(); g.rect(0, 0, w, h); g.clip();
+  g.scale(sx, sy);
+  // 已探明的海
+  g.fillStyle = '#a8c4cf';
+  eachCell((c, r, known, lngW, latN) => {
+    if (!known) return;
+    const a = project(lngW, latN), b = project(lngW + CELL, latN - CELL);
+    g.fillRect(a.x, a.y, b.x - a.x + 1, b.y - a.y + 1);
   });
-  svg.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - last.x, dy = e.clientY - last.y;
-    moved += Math.abs(dx) + Math.abs(dy);
-    const r = svg.getBoundingClientRect();
-    const scale = Math.min(r.width / VIEW_W, r.height / VIEW_H);
-    view.tx += dx / scale; view.ty += dy / scale;
-    last = { x: e.clientX, y: e.clientY };
-    clampView(); applyView();
-  });
-  const end = (e) => {
-    if (!dragging) return;
-    dragging = false;
-    if (moved < 5 && cb.onSeaClick) {          // 视作点击而非拖拽
-      const m = toMap(e.clientX, e.clientY);
-      const ll = unproject(m.x, m.y);
-      cb.onSeaClick(ll.lng, ll.lat);
+  // 陆地轮廓（淡）
+  g.strokeStyle = 'rgba(122,99,56,.55)'; g.lineWidth = 1 / sx;
+  for (const ring of LAND_RINGS) {
+    g.beginPath();
+    let st = false;
+    for (const [lng, lat] of ring.pts) {
+      const p = project(lng, lat);
+      st ? g.lineTo(p.x, p.y) : (g.moveTo(p.x, p.y), st = true);
     }
-  };
-  svg.addEventListener('pointerup', end);
-  svg.addEventListener('pointercancel', () => { dragging = false; });
-}
-
-export function highlightPort(id, on = true) {
-  const g = portNodes[id];
-  if (!g) return;
-  g.classList.toggle('port-active', on);
+    g.closePath(); g.stroke();
+  }
+  g.restore();
+  // 本船
+  const me = project(state.position.lng, state.position.lat);
+  g.fillStyle = '#8c2f22';
+  g.beginPath(); g.arc(me.x * sx, me.y * sy, 4, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#fff'; g.lineWidth = 1.2; g.stroke();
+  g.restore();
 }

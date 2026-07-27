@@ -30,24 +30,23 @@
       </div>
     </div>
 
-    <!-- 游戏主界面 -->
+    <!-- 游戏主界面：港口主视野 / 近海航行视野 -->
     <div id="game-screen" class="screen game" hidden>
-      <div class="chart-wrap">
-        <svg id="chart"></svg>
-        <div id="hud" class="hud"></div>
-      </div>
-      <aside id="panel" class="panel"></aside>
-    </div>
+      <div id="hud" class="hud"></div>
 
-    <!-- 城镇小地图 -->
-    <div id="town" class="town hidden">
-      <div class="town-bar">
-        <span id="town-title"></span>
-        <span class="town-tip">点建筑进入设施 · 点人物交谈 · 点空地走过去</span>
-        <button id="town-leave" class="ghost-btn">⚓ 回到海图</button>
-      </div>
-      <div class="town-stage"><canvas id="tcanvas"></canvas></div>
-      <!-- 设施面板：在城镇内就地打开，不必回大地图 -->
+      <!-- 近海航行视野 -->
+      <div id="view-sail" class="view-stage hidden"><canvas id="scanvas"></canvas></div>
+
+      <!-- 港口主视野：街景（靠港时的默认视野） -->
+      <div id="view-port" class="view-stage"><canvas id="tcanvas"></canvas></div>
+
+      <!-- 底部指令栏 -->
+      <div id="cmd" class="cmdbar"></div>
+
+      <!-- 侧栏面板（舰队/任务/日志） -->
+      <aside id="panel" class="panel slide hidden"></aside>
+
+      <!-- 设施面板：在港口视野里就地打开 -->
       <div id="town-panel" class="town-panel hidden">
         <div class="tp-head">
           <span id="tp-title"></span>
@@ -55,6 +54,16 @@
         </div>
         <div id="tp-body" class="tp-body"></div>
       </div>
+    </div>
+
+    <!-- 全球海图（参考图，带迷雾） -->
+    <div id="chart-view" class="chartview hidden">
+      <div class="chart-bar">
+        <b>🗺️ 海图</b>
+        <span class="muted small">未到过的海域是空白的——航行会把它们画出来</span>
+        <button id="chart-close" class="ghost-btn">✕ 收起</button>
+      </div>
+      <div class="chart-stage"><canvas id="cchart"></canvas></div>
     </div>
 
     <!-- 海战 -->
