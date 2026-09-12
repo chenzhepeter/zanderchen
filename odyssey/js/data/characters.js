@@ -1,0 +1,76 @@
+// 立绘规格。art/portrait.js 按这些参数把人物拼出来——没有图片，全是 canvas 图元。
+// frame: 'broad' | 'slim'（体型轮廓，与角色性别无关，只影响剪影）
+// hair:  short | long | curls | bun | wild | bald
+// head:  helmet | laurel | band | veil | crown | hood | petasos | none
+export const CHARACTERS = {
+  narrator:   null,   // 旁白：不出立绘
+
+  odysseus:   { name: '奥德修斯', frame: 'broad', skin: '#d99a62', hairC: '#3a2418', hair: 'curls',
+                beard: true, cloth: '#8c3a2a', cloak: '#5b2a3e', head: 'none' },
+  odysseus_h: { name: '奥德修斯', frame: 'broad', skin: '#d99a62', hairC: '#3a2418', hair: 'curls',
+                beard: true, cloth: '#8c3a2a', cloak: '#5b2a3e', head: 'helmet' },
+  odysseus_b: { name: '陌生的老乞丐', frame: 'slim', skin: '#b08050', hairC: '#b8b0a4', hair: 'wild',
+                beard: true, cloth: '#6b6152', cloak: '#4a4238', head: 'hood' },
+
+  eurylochus: { name: '欧律洛科斯', frame: 'broad', skin: '#d9a06b', hairC: '#3a2a1c', hair: 'short',
+                beard: true, cloth: '#7a3b2a', cloak: '#4a3020', head: 'helmet' },
+  perimedes:  { name: '珀里墨得斯', frame: 'broad', skin: '#c98a58', hairC: '#241f33', hair: 'short',
+                beard: false, cloth: '#4a6b8a', cloak: '#2f4a60', head: 'band' },
+  elpenor:    { name: '埃尔佩诺耳', frame: 'slim', skin: '#e8b98a', hairC: '#8a6a2a', hair: 'curls',
+                beard: false, cloth: '#6b7f4a', cloak: null, head: 'none' },
+  eurybates:  { name: '欧吕巴忒斯', frame: 'broad', skin: '#b87a4a', hairC: '#2a2a2a', hair: 'short',
+                beard: true, cloth: '#d9a441', cloak: '#8a6a20', head: 'band' },
+  crew:       { name: '船员', frame: 'broad', skin: '#c98a58', hairC: '#3a2a1c', hair: 'short',
+                beard: true, cloth: '#8a7a5c', cloak: null, head: 'none' },
+
+  athena:     { name: '雅典娜', frame: 'slim', skin: '#efd0a8', hairC: '#c99a3a', hair: 'long',
+                beard: false, cloth: '#e8e0cc', cloak: '#6b8f7a', head: 'helmet', glow: '#9fd8c8' },
+  hermes:     { name: '一个年轻人', frame: 'slim', skin: '#e8c090', hairC: '#8a7a3a', hair: 'curls',
+                beard: false, cloth: '#dfe8ec', cloak: '#a8c4d0', head: 'petasos', glow: '#cfe8f4' },
+  poseidon:   { name: '海的声音', frame: 'broad', skin: '#8fb8c8', hairC: '#2f5a6b', hair: 'wild',
+                beard: true, cloth: '#1b3a5c', cloak: '#12283f', head: 'none', glow: '#4a9ac0' },
+
+  polyphemus: { name: '波吕斐摩斯', frame: 'broad', skin: '#a8a06b', hairC: '#3a2a1c', hair: 'wild',
+                beard: true, cloth: '#6b5a3a', cloak: null, head: 'none', cyclops: true, scale: 1.35 },
+  aeolus:     { name: '埃俄罗斯', frame: 'broad', skin: '#e0b080', hairC: '#c0c0c8', hair: 'long',
+                beard: true, cloth: '#8fb8d8', cloak: '#4a6fa8', head: 'crown' },
+  lotusman:   { name: '食莲人', frame: 'slim', skin: '#c08a5a', hairC: '#4a3a2a', hair: 'long',
+                beard: false, cloth: '#f0d0e0', cloak: '#7fc4a8', head: 'laurel' },
+  circe:      { name: '喀耳刻', frame: 'slim', skin: '#efd8b8', hairC: '#a33f22', hair: 'long',
+                beard: false, cloth: '#c1512f', cloak: '#5b2a3e', head: 'crown', glow: '#e8a05c' },
+  tiresias:   { name: '提瑞西阿斯', frame: 'slim', skin: '#c8c0b0', hairC: '#e0e0e0', hair: 'wild',
+                beard: true, cloth: '#8a8a96', cloak: '#5a5a68', head: 'hood', blind: true, ghost: true },
+  anticlea:   { name: '安提克勒亚', frame: 'slim', skin: '#cfc4b4', hairC: '#c8c0b8', hair: 'bun',
+                beard: false, cloth: '#a8a4b0', cloak: '#6b6878', head: 'veil', ghost: true },
+  achilles:   { name: '阿喀琉斯', frame: 'broad', skin: '#c4bcb0', hairC: '#d0b060', hair: 'long',
+                beard: false, cloth: '#9aa0b0', cloak: '#5a6070', head: 'helmet', ghost: true },
+  agamemnon:  { name: '阿伽门农', frame: 'broad', skin: '#b8b0a4', hairC: '#8a8a8a', hair: 'short',
+                beard: true, cloth: '#8a7a90', cloak: '#5a4a60', head: 'crown', ghost: true },
+  siren:      { name: '塞壬', frame: 'slim', skin: '#e8d8c0', hairC: '#2a2a3a', hair: 'long',
+                beard: false, cloth: '#6b5a8a', cloak: '#3a2a4a', head: 'none', glow: '#c8a8e8' },
+  calypso:    { name: '卡吕普索', frame: 'slim', skin: '#e8ceb0', hairC: '#3a2a4a', hair: 'long',
+                beard: false, cloth: '#a8d8d0', cloak: '#3f7fa8', head: 'laurel', glow: '#a8e8e0' },
+  nausicaa:   { name: '瑙西卡', frame: 'slim', skin: '#f0d8b8', hairC: '#6b4a2a', hair: 'bun',
+                beard: false, cloth: '#f5e2c4', cloak: '#8fb8d8', head: 'band' },
+  alcinous:   { name: '阿尔喀诺俄斯', frame: 'broad', skin: '#d0a070', hairC: '#b0b0b8', hair: 'long',
+                beard: true, cloth: '#4a6fa8', cloak: '#d9a441', head: 'crown' },
+  demodocus:  { name: '得摩多科斯', frame: 'slim', skin: '#c8a880', hairC: '#d8d8d8', hair: 'long',
+                beard: true, cloth: '#c4b08c', cloak: '#8a7a5c', head: 'laurel', blind: true },
+  eumaeus:    { name: '欧迈俄斯', frame: 'broad', skin: '#b87a4a', hairC: '#5a4a3a', hair: 'short',
+                beard: true, cloth: '#6b6152', cloak: '#4a4238', head: 'none' },
+  eurycleia:  { name: '欧律克勒娅', frame: 'slim', skin: '#d8c0a0', hairC: '#d0d0d0', hair: 'bun',
+                beard: false, cloth: '#c4b08c', cloak: null, head: 'veil' },
+  penelope:   { name: '珀涅罗珀', frame: 'slim', skin: '#eed4b4', hairC: '#4a3020', hair: 'bun',
+                beard: false, cloth: '#8c3a5a', cloak: '#e8c9a0', head: 'veil' },
+  telemachus: { name: '忒勒马科斯', frame: 'slim', skin: '#e0b088', hairC: '#3a2418', hair: 'curls',
+                beard: false, cloth: '#6b7f4a', cloak: '#4a5c3a', head: 'none' },
+  antinous:   { name: '安提诺俄斯', frame: 'broad', skin: '#e0b888', hairC: '#2a1a10', hair: 'curls',
+                beard: false, cloth: '#7a3b6a', cloak: '#d9a441', head: 'laurel' },
+  suitor:     { name: '求婚者', frame: 'broad', skin: '#d0a070', hairC: '#3a2a1c', hair: 'short',
+                beard: true, cloth: '#8a6a90', cloak: '#5a4a60', head: 'none' },
+  laestry:    { name: '莱斯特律戈涅斯人', frame: 'broad', skin: '#8a9a7a', hairC: '#2a2a1a', hair: 'wild',
+                beard: true, cloth: '#4a4230', cloak: null, head: 'none', scale: 1.25 },
+};
+
+export const charById = (id) => CHARACTERS[id] || null;
+export const charName = (id) => CHARACTERS[id]?.name || '';

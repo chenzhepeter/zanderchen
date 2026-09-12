@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="description" content="归途 · Nostos —— 以《奥德赛》为底本的视觉小说 RPG：计谋牌组构筑、解谜、五种结局。" />
+    <title>归途 · Nostos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- 开始菜单 -->
+    <div id="start-screen" class="screen start">
+      <div class="start-card">
+        <p class="eyebrow">ΟΔΥΣΣΕΙΑ · 特洛伊陷落后的第十年</p>
+        <h1>归 途</h1>
+        <p class="sub">N O S T O S</p>
+        <p class="tagline">
+          你是奥德修斯。六百个人跟着你从特洛伊出发，海图上到伊塔卡只有二十天的路。<br />
+          你走了十年。<br /><br />
+          <i>这一路真正难的不是怎么打赢，而是什么时候该忍住。</i>
+        </p>
+        <div class="start-btns">
+          <button id="btn-new" class="primary-btn big">⛵ 启航</button>
+          <button id="btn-continue" class="ghost-btn big">📖 继续航程</button>
+          <button id="btn-slots" class="ghost-btn big">📂 存档</button>
+        </div>
+        <p class="foot"><a href="../index.html">‹ 返回主页</a> · <span id="version"></span></p>
+      </div>
+    </div>
+
+    <!-- 游戏主界面：视觉小说 -->
+    <div id="game-screen" class="screen game" hidden>
+      <canvas id="vn-canvas"></canvas>
+
+      <div id="hud" class="hud"></div>
+
+      <div id="topbar" class="topbar">
+        <button class="icon-btn" id="btn-deck" title="牌组">🃏</button>
+        <button class="icon-btn" id="btn-crew" title="同伴">⚓</button>
+        <button class="icon-btn" id="btn-journal" title="记事本">📖</button>
+        <button class="icon-btn" id="btn-menu" title="菜单">☰</button>
+      </div>
+
+      <!-- 对话框（DOM 覆盖层） -->
+      <div id="vn-box" class="vn-box hidden"></div>
+    </div>
+
+    <!-- 战斗 -->
+    <div id="battle-screen" class="screen battle hidden">
+      <canvas id="battle-canvas"></canvas>
+      <div id="battle-top" class="battle-top"></div>
+      <div id="battle-hand" class="hand"></div>
+      <div id="battle-bar" class="battle-bar"></div>
+    </div>
+
+    <!-- 谜题 -->
+    <div id="puzzle-screen" class="screen puzzle hidden">
+      <div class="puz-head">
+        <span id="puz-title"></span>
+        <span class="grow"></span>
+        <button id="puz-hint" class="ghost-btn small">🦉 雅典娜的低语</button>
+      </div>
+      <div id="puz-body" class="puz-body"></div>
+      <div id="puz-foot" class="puz-foot"></div>
+    </div>
+
+    <!-- 侧栏面板：牌组 / 同伴 / 记事本 -->
+    <aside id="panel" class="panel hidden"></aside>
+
+    <div id="fx-layer" class="fx-layer"></div>
+    <div id="modal-root"></div>
+    <div id="toast" class="toast"></div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

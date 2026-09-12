@@ -33,5 +33,6 @@ bump() {
 bump "airline" "airline/js/state.js"
 bump "towerclash" "towerclash/js/data/config.js"
 bump "blackbeard" "blackbeard/js/state.js"
+bump "odyssey" "odyssey/js/state.js"
 
 exit 0
