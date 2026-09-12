@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="description" content="决战朝鲜 · 重制版 —— 复刻 1999 年西山居经典战棋：独立一师、十场志愿军经典战役、伤员/疲劳/弹药/工事/策略。" />
+    <title>决战朝鲜 · 重制版</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- 标题 -->
+    <div id="start-screen" class="screen start">
+      <div class="start-card">
+        <p class="eyebrow">1950 — 1953 · 抗美援朝 · 回合制战棋</p>
+        <h1>决战朝鲜</h1>
+        <p class="sub">R E M A K E · 重制版</p>
+        <p class="tagline">
+          你是志愿军独立一师的师长。从两水洞的第一枪到金城的最后一役，<br />
+          十场经典战役，每一支部队的人数、伤员、士气、疲劳和弹药都由你负责。<br /><br />
+          <i>夜晚是我们的。天亮以后，天上是他们的。</i>
+        </p>
+        <div class="start-btns">
+          <button id="btn-new" class="primary-btn big">🎖️ 新战役</button>
+          <button id="btn-continue" class="ghost-btn big">📖 继续</button>
+          <button id="btn-levels" class="ghost-btn big">🗺️ 关卡选择</button>
+          <button id="btn-slots" class="ghost-btn big">📂 存档</button>
+          <button id="btn-help" class="ghost-btn big">📘 玩法说明</button>
+        </div>
+        <p class="foot"><a href="../index.html">‹ 返回主页</a> · <span id="version"></span></p>
+      </div>
+    </div>
+
+    <!-- 开局设置 / 简报 / 整补 / 结局（共用一个滚动容器）-->
+    <div id="campaign-screen" class="screen campaign hidden">
+      <div id="campaign-body" class="campaign-body"></div>
+    </div>
+
+    <!-- 战斗 -->
+    <div id="battle-screen" class="screen battle hidden">
+      <div class="map-wrap"><canvas id="map"></canvas></div>
+      <div id="topbar" class="topbar"></div>
+      <div id="hint" class="hint hidden"></div>
+      <aside id="side" class="side empty"></aside>
+      <div id="log" class="log"></div>
+      <div id="logstrip" class="logstrip"></div>
+      <div id="actionbar" class="actionbar"></div>
+      <div id="dialog" class="dialog hidden"></div>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast" class="toast"></div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
