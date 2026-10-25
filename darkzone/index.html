@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="description" content="暗区搜寻 EP01 —— 俯视 2D 潜入解密逃脱：视野迷雾、四级警戒、群体追捕。" />
+    <title>暗区搜寻 · Dark Zone</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <!-- 全局警戒边缘光效 -->
+    <div id="vignette"></div>
+
+    <!-- ========== HUD ========== -->
+    <div id="hud" class="hidden">
+      <div id="panel-objectives" class="hud-panel">
+        <div class="hud-title">📋 目标</div>
+        <ul id="objective-list"></ul>
+        <div id="clue-list"></div>
+      </div>
+
+      <div id="panel-alert">
+        <div id="global-alert-label"></div>
+      </div>
+
+      <div id="prompt-bar"></div>
+      <div id="progress-bar" class="hidden"><div id="progress-fill"></div><span id="progress-text"></span></div>
+
+      <div id="stance-bar">
+        <span id="stance-icon">🚶</span>
+        <span id="stance-text">步行</span>
+        <span id="can-count" class="hidden">🥤 <b id="can-num">0</b></span>
+      </div>
+
+      <div id="toast-layer"></div>
+      <div id="alarm-banner" class="hidden">🚨 警报！全体警卫正在赶来！</div>
+      <div id="whistle-hint" class="hidden"></div>
+    </div>
+
+    <!-- ========== 密码键盘 ========== -->
+    <div id="keypad" class="overlay hidden">
+      <div class="keypad-card">
+        <h2 id="keypad-title">输入密码</h2>
+        <p id="keypad-sub" class="keypad-sub"></p>
+        <div id="keypad-display" class="keypad-display">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </div>
+        <div id="keypad-keys">
+          <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+          <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+          <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+          <button class="keypad-fn" data-k="clear">清除</button><button data-k="0">0</button><button class="keypad-fn" data-k="back">退格</button>
+        </div>
+        <div class="keypad-btns">
+          <button id="keypad-ok" class="primary-btn">确认</button>
+          <button id="keypad-cancel" class="ghost-btn">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 文本阅读 ========== -->
+    <div id="reader" class="overlay hidden">
+      <div class="reader-card">
+        <h2 id="reader-title"></h2>
+        <div id="reader-body"></div>
+        <button id="reader-close" class="primary-btn">合上</button>
+      </div>
+    </div>
+
+    <!-- ========== 开始菜单 ========== -->
+    <div id="menu" class="screen">
+      <div class="menu-card">
+        <p class="eyebrow">EP01 · 办公楼 2F · 凌晨 02:47</p>
+        <h1>暗区搜寻</h1>
+        <p class="sub">DARK ZONE</p>
+        <p class="tagline">
+          从后勤通道潜入，拿到档案室里的 U 盘，在天亮前消失。<br />
+          你没有武器——你能依靠的只有他们的视线、你的脚步声，和几扇能关上的门。
+        </p>
+        <div class="menu-btns">
+          <button id="btn-start" class="primary-btn big">▶ 开始潜入</button>
+          <button id="btn-help" class="ghost-btn big">操作说明</button>
+        </div>
+        <p class="foot">俯视 2D 潜入解密 · 推荐桌面浏览器键鼠操作 · 进度自动存在浏览器</p>
+      </div>
+    </div>
+
+    <!-- ========== 操作说明 ========== -->
+    <div id="help" class="screen hidden">
+      <div class="menu-card">
+        <h2>操作说明</h2>
+        <div class="help-grid">
+          <span class="key">W A S D</span><span>移动</span>
+          <span class="key">鼠标</span><span>控制朝向</span>
+          <span class="key">C</span><span>蹲伏 / 站立（蹲伏无声、视野更小更难被发现）</span>
+          <span class="key">Shift（按住）</span><span>奔跑（4.8m/s，但 9m 外都听得到）</span>
+          <span class="key">E</span><span>交互：开门/关门、搜索、拾取、阅读、刷卡、藏匿</span>
+          <span class="key">E（蹲伏时对门）</span><span>慢开门，0.8s 且完全静音</span>
+          <span class="key">右键（按住瞄准，松开）</span><span>投掷易拉罐，落点 8m 噪声引开敌人</span>
+          <span class="key">数字键 0–9</span><span>密码键盘输入</span>
+          <span class="key">Esc / P</span><span>暂停</span>
+        </div>
+        <div class="help-tips">
+          <p>🟡 敌人的视野锥全程可见：白色平静、黄色疑惑、橙色警戒、红色追捕。</p>
+          <p>🔦 每间房的灯开关可以关灯——敌人视野从 9m 骤降到 4m，你的视野也会缩小。</p>
+          <p>🚪 被追捕时，关门能拖住他们 3 秒；踢开的门再也关不上。</p>
+        </div>
+        <button id="btn-help-back" class="primary-btn">返回</button>
+      </div>
+    </div>
+
+    <!-- ========== 暂停 ========== -->
+    <div id="pause" class="screen hidden">
+      <div class="menu-card">
+        <h2>已暂停</h2>
+        <div class="menu-btns">
+          <button id="btn-resume" class="primary-btn big">继续</button>
+          <button id="btn-restart" class="ghost-btn big">重新开始本关</button>
+          <button id="btn-menu" class="ghost-btn big">返回主菜单</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 被抓 ========== -->
+    <div id="caught" class="screen hidden">
+      <div class="menu-card caught-card">
+        <h1>被抓住了</h1>
+        <p id="caught-msg" class="tagline"></p>
+        <p id="caught-hint" class="caught-hint"></p>
+        <div class="menu-btns">
+          <button id="btn-retry" class="primary-btn big">从检查点继续</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 通关结算 ========== -->
+    <div id="result" class="screen hidden">
+      <div class="menu-card">
+        <p class="eyebrow">消防楼梯间 · 撤离成功</p>
+        <h1 id="result-rank">潜行者</h1>
+        <p id="result-sub" class="tagline"></p>
+        <ul id="result-stats" class="result-stats"></ul>
+        <div class="menu-btns">
+          <button id="btn-again" class="primary-btn big">再来一次</button>
+          <button id="btn-result-menu" class="ghost-btn big">返回主菜单</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
