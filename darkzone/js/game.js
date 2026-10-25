@@ -954,7 +954,7 @@ export class Game {
       // 关灯区域叠暗
       let lit = r.light !== 'bright' ? false : this.lights[r.id];
       if (!lit) {
-        ctx.fillStyle = 'rgba(2,4,12,0.62)';
+        ctx.fillStyle = 'rgba(3,6,14,0.46)';
         ctx.fillRect(r.x, r.y, r.w, r.h);
       }
       // 房间名

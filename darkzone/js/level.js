@@ -4,15 +4,15 @@ import { RULESET as C } from './config.js';
 
 // ---------- 区域 ----------
 export const REGIONS = [
-  { id: 'south', name: '南走廊', x: 0, y: 0, w: 48, h: 6, light: 'bright', floor: '#23262d', canSwitch: false },
-  { id: 'archive', name: '档案室', x: 0, y: 6, w: 12, h: 14, light: 'bright', floor: '#2e2620', canSwitch: true },
-  { id: 'office', name: '开放办公区', x: 12, y: 6, w: 22, h: 14, light: 'bright', floor: '#26292f', canSwitch: true },
-  { id: 'pantry', name: '茶水间', x: 34, y: 6, w: 6, h: 7, light: 'bright', floor: '#262b2b', canSwitch: true },
-  { id: 'lobby', name: '前台', x: 40, y: 6, w: 8, h: 7, light: 'bright', floor: '#2b2923', canSwitch: true },
-  { id: 'meeting', name: '会议室', x: 34, y: 13, w: 14, h: 11, light: 'bright', floor: '#222830', canSwitch: true },
-  { id: 'boss', name: '主管办公室', x: 0, y: 20, w: 14, h: 10, light: 'bright', floor: '#2e2720', canSwitch: true },
-  { id: 'north', name: '北走廊', x: 14, y: 20, w: 20, h: 10, light: 'bright', floor: '#23262d', canSwitch: true },
-  { id: 'stair', name: '消防楼梯间', x: 34, y: 24, w: 14, h: 6, light: 'dim', floor: '#1f2226', canSwitch: false },
+  { id: 'south', name: '南走廊', x: 0, y: 0, w: 48, h: 6, light: 'bright', floor: '#2e323b', canSwitch: false },
+  { id: 'archive', name: '档案室', x: 0, y: 6, w: 12, h: 14, light: 'bright', floor: '#3a3028', canSwitch: true },
+  { id: 'office', name: '开放办公区', x: 12, y: 6, w: 22, h: 14, light: 'bright', floor: '#32363e', canSwitch: true },
+  { id: 'pantry', name: '茶水间', x: 34, y: 6, w: 6, h: 7, light: 'bright', floor: '#323939', canSwitch: true },
+  { id: 'lobby', name: '前台', x: 40, y: 6, w: 8, h: 7, light: 'bright', floor: '#38352c', canSwitch: true },
+  { id: 'meeting', name: '会议室', x: 34, y: 13, w: 14, h: 11, light: 'bright', floor: '#2e3640', canSwitch: true },
+  { id: 'boss', name: '主管办公室', x: 0, y: 20, w: 14, h: 10, light: 'bright', floor: '#3a3128', canSwitch: true },
+  { id: 'north', name: '北走廊', x: 14, y: 20, w: 20, h: 10, light: 'bright', floor: '#2e323b', canSwitch: true },
+  { id: 'stair', name: '消防楼梯间', x: 34, y: 24, w: 14, h: 6, light: 'dim', floor: '#282c32', canSwitch: false },
 ];
 
 export function regionAt(x, y) {

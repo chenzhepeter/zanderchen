@@ -26,9 +26,9 @@ export const RULESET = {
   // 敌人视野（明/半暗/暗），视野锥 120°
   GUARD_VISION: {
     halfAngle: 60,
-    bright: { base: 9, crouch: 6.3, crouchStill: 4.5 },
-    dim: { base: 6, crouch: 4.2, crouchStill: 3 },
-    dark: { base: 4, crouch: 2.8, crouchStill: 2 },
+    bright: { base: 7.5, crouch: 5.3, crouchStill: 3.8 },
+    dim: { base: 5, crouch: 3.5, crouchStill: 2.5 },
+    dark: { base: 3.4, crouch: 2.4, crouchStill: 1.7 },
   },
 
   // 警戒阈值
@@ -36,11 +36,11 @@ export const RULESET = {
 
   // 警戒槽积累速率（每秒）
   ALERT_GAIN: {
-    exposedBright: 55, // 明处全身站立
-    halfCover: 20, // 半身遮挡（蹲伏+半高隔间）
-    exposedDark: 10, // 暗处暴露
-    farGlimpse: 8, // 距离 >7m 短暂一瞥
-    soundEvent: 18, // 一次性声音
+    exposedBright: 38, // 明处全身站立（持续约 2s 到 L3）
+    halfCover: 14, // 半身遮挡（蹲伏+半高隔间）
+    exposedDark: 7, // 暗处暴露
+    farGlimpse: 6, // 距离 >7m 短暂一瞥
+    soundEvent: 14, // 一次性声音
     evidence: 50, // 物证（门开/灯关/物品被拿）
   },
 

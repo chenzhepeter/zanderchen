@@ -63,9 +63,9 @@ export class FogOfWar {
       const v = cells[i];
       const o = i * 4;
       if (v === 0) {
-        img.data[o] = 3; img.data[o + 1] = 4; img.data[o + 2] = 7; img.data[o + 3] = 255;
+        img.data[o] = 10; img.data[o + 1] = 13; img.data[o + 2] = 20; img.data[o + 3] = 235;
       } else if (v === 1) {
-        img.data[o] = 4; img.data[o + 1] = 5; img.data[o + 2] = 9; img.data[o + 3] = 215;
+        img.data[o] = 12; img.data[o + 1] = 15; img.data[o + 2] = 22; img.data[o + 3] = 170;
       } else {
         img.data[o + 3] = 0;
       }
