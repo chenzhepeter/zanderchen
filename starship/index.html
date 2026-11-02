@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#20271f" />
+  <meta name="description" content="星河战队：孤垒——四面布防、实时增援、击杀补给与高爆炸弹投掷，十回合虫潮、装备升级与近距喷火，守至黎明。" />
+  <title>星河战队：孤垒 · Starship</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <a class="brand" href="../index.html" aria-label="返回个人主页"><span class="brand-mark">✦</span><span>星河战队<small>孤 垒 / OUTPOST 07</small></span></a>
+      <div class="mission-info"><span id="phase-label">前哨防御指挥系统</span><strong id="round-label">CAMPAIGN / 10</strong></div>
+      <div class="resource"><span>军需点</span><strong id="credits">1,000</strong></div>
+      <div class="income-indicator"><span>本轮击杀补给</span><strong id="kill-income">+0</strong></div>
+      <div class="core-indicator"><span>指挥中心</span><strong id="core-hp">100%</strong></div>
+      <button class="mobile-command icon-button" data-action="briefing" title="战术面板" aria-label="切换战术面板">战术</button>
+      <button id="sound-button" class="icon-button" data-action="sound" title="切换音效" aria-label="切换音效">♫</button>
+      <button id="pause-button" class="icon-button" data-action="pause" title="暂停（空格）" aria-label="暂停">Ⅱ</button>
+      <button class="icon-button" data-action="menu" title="主菜单" aria-label="主菜单">☰</button>
+    </header>
+    <main class="workspace">
+      <aside class="command-panel">
+        <div class="panel-heading"><span>战术指挥</span><span class="live-dot">● ONLINE</span></div>
+        <section id="briefing" class="briefing"></section>
+        <div class="section-label">防线状态 <small>点选查看 / 修复</small></div>
+        <div id="wall-list" class="wall-list"></div>
+        <details class="roster"><summary>驻军名册 <span id="roster-count">0</span></summary><div id="roster-list"></div></details>
+        <div class="section-label">当前指令</div>
+        <section id="selection-panel" class="selection-panel"></section>
+        <div class="panel-footer"><span id="version"></span><button data-action="help">操作说明 ↗</button></div>
+      </aside>
+      <section class="battlefield" aria-label="四面基地防御战场">
+        <canvas id="battlefield" aria-label="点选守军升级或调动，拖动守军到高亮空位；拖动空地平移战场，点虫群可投弹"></canvas>
+        <div class="map-caption"><span>FEDERATION / DEFENSE COMMAND</span><span id="map-time">T− PREPARATION</span></div>
+        <div class="map-corner"><b>07</b><span>孤立前哨<br />120 × 90</span></div>
+        <div id="placement-hint" class="placement-hint hidden"></div>
+        <section id="unit-actions" class="unit-actions hidden" role="region" aria-label="单位操作"></section>
+        <div class="battle-controls"><button data-action="zoom-out" aria-label="缩小战场">−</button><button data-action="zoom-reset">全景</button><button data-action="zoom-in" aria-label="放大战场">＋</button><button id="speed-button" data-action="speed">2× 速度</button><button data-action="ranges" id="ranges-button">射程辅助</button></div>
+        <div id="phase-strip" class="phase-strip"></div>
+        <div id="toasts" class="toasts" aria-live="polite"></div>
+      </section>
+    </main>
+    <footer class="deployment-bar">
+      <div class="shop-label">部署军械<small>点选卡片 → 空位</small></div>
+      <div id="shop" class="shop"></div>
+      <div class="deployment-actions"><button class="secondary-button" data-action="undo" id="undo-button">↶ 撤销</button><button class="primary-button" data-action="start" id="start-button">开始进攻 <span>→</span></button></div>
+    </footer>
+  </div>
+  <div id="overlay" class="overlay"></div>
+  <script>
+    // Keep every ES module in one fresh revision, including nested imports.
+    (() => {
+      const revision = Date.now().toString(36);
+      const paths = ["js/art.js", "js/audio.js", "js/battlefield.js", "js/combat.js", "js/data/config.js", "js/data/rounds.js", "js/economy.js", "js/effects.js", "js/enemies.js", "js/game.js", "js/geometry.js", "js/main.js", "js/navigation.js", "js/render.js", "js/state.js", "js/ui.js"];
+      const imports = Object.fromEntries(paths.map(path => {
+        const url = new URL(path, document.baseURI).href;
+        return [url, `${url}?v=${revision}`];
+      }));
+      const map = document.createElement('script');
+      map.type = 'importmap'; map.textContent = JSON.stringify({ imports });
+      document.head.appendChild(map);
+      document.querySelector('link[rel="stylesheet"]').href = `styles.css?v=${revision}`;
+      const entry = document.createElement('script');
+      entry.type = 'module'; entry.src = imports[new URL('js/main.js', document.baseURI).href];
+      document.body.appendChild(entry);
+    })();
+  </script>
+</body>
+</html>
